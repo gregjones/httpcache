@@ -21,13 +21,14 @@ import (
 var _ = fmt.Println
 
 const (
-	STALE = iota
-	FRESH
-	TRANSPARENT
+	stale = iota
+	fresh
+	transparent
+	// Header added to responses that are returned from the cache
 	XFromCache = "X-From-Cache"
 )
 
-// A Cache interface is used by the Transport to store and retrieve responses
+// A Cache interface is used by the Transport to store and retrieve responses.
 type Cache interface {
 	// Get returns the []byte representation of a cached response and a bool
 	// set to true if the value isn't empty
@@ -38,7 +39,7 @@ type Cache interface {
 	Delete(key string)
 }
 
-// MemoryCache is an implemtation of Cache that stores responses in an in-memory map
+// MemoryCache is an implemtation of Cache that stores responses in an in-memory map.
 type MemoryCache struct {
 	sync.RWMutex
 	items map[string][]byte
@@ -109,7 +110,7 @@ func varyMatches(cachedResp *http.Response, req *http.Request) bool {
 // the server.
 //
 // If there is a stale Response, then any validators it contains will be set on the new request
-// to give the server a chance to response with NotModified. If this happens, then the cached Response
+// to give the server a chance to respond with NotModified. If this happens, then the cached Response
 // will be returned.
 func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	cacheKey := req.URL.String()
@@ -128,12 +129,12 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 
 			if varyMatches(cachedResp, req) {
 				// Can only use cached value if the new request doesn't Vary significantly
-				freshness := getFreshness(cachedResp.Header, req.Header)
-				if freshness == FRESH {
+				freshness := getfreshness(cachedResp.Header, req.Header)
+				if freshness == fresh {
 					return cachedResp, nil
 				}
 
-				if freshness == STALE {
+				if freshness == stale {
 					// Add validators if caller hasn't already done so
 					etag := cachedResp.Header.Get("etag")
 					if etag != "" && req.Header.Get("etag") == "" {
@@ -195,34 +196,34 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 	return resp, nil
 }
 
-// getFreshness will return one of Fresh/Stale/Transparent based on the cache-control
+// getfreshness will return one of fresh/stale/transparent based on the cache-control
 // values of the request and the response
 // 
-// Fresh indicates the response can be returned
-// Stale indicates that the response needs validating before it is returned
-// Transparent indicates the response should not be used to fulfil the request
+// fresh indicates the response can be returned
+// stale indicates that the response needs validating before it is returned
+// transparent indicates the response should not be used to fulfil the request
 //
 // Because this is only a private cache, 'public' and 'private' in cache-control aren't
 // signficant. Similarly, smax-age isn't used.
 //
 // Limitation: max-stale is not taken into account. It should be.
-func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
+func getfreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	respCacheControl := parseCacheControl(respHeaders)
 	reqCacheControl := parseCacheControl(reqHeaders)
 	if _, ok := reqCacheControl["no-cache"]; ok {
-		return TRANSPARENT
+		return transparent
 	}
 	if _, ok := respCacheControl["no-cache"]; ok {
-		return STALE
+		return stale
 	}
 	if _, ok := reqCacheControl["only-if-cached"]; ok {
-		return FRESH
+		return fresh
 	}
 	dateHeader := respHeaders.Get("date")
 	if dateHeader != "" {
 		date, err := time.Parse(time.RFC1123, dateHeader)
 		if err != nil {
-			return STALE
+			return stale
 		}
 		currentAge := time.Since(date)
 		var lifetime time.Duration
@@ -252,20 +253,20 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 				lifetime = zeroDuration
 			}
 		}
-		if minFresh, ok := reqCacheControl["min-fresh"]; ok {
+		if minfresh, ok := reqCacheControl["min-fresh"]; ok {
 			//  the client wants a response that will still be fresh for at least the specified number of seconds.
-			minFreshDuration, err := time.ParseDuration(minFresh + "s")
+			minfreshDuration, err := time.ParseDuration(minfresh + "s")
 			if err != nil {
-				currentAge = time.Duration(currentAge.Nanoseconds() + minFreshDuration.Nanoseconds())
+				currentAge = time.Duration(currentAge.Nanoseconds() + minfreshDuration.Nanoseconds())
 			}
 		}
 
 		if lifetime > currentAge {
-			return FRESH
+			return fresh
 		}
 
 	}
-	return STALE
+	return stale
 }
 
 func getHopByHopHeaders(resp *http.Response) []string {
