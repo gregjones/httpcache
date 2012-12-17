@@ -113,14 +113,13 @@ func varyMatches(cachedResp *http.Response, req *http.Request) bool {
 // will be returned.
 func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	cacheKey := req.URL.String()
-	cachedVal, _ := t.cache.Get(cacheKey)
+	cachedVal, ok := t.cache.Get(cacheKey)
 	cacheableMethod := req.Method == "GET" || req.Method == "HEAD"
 	if !cacheableMethod {
 		// Need to invalidate an existing value
 		t.cache.Delete(cacheKey)
 	}
-
-	if cachedVal != nil && cacheableMethod && req.Header.Get("range") == "" {
+	if ok && cacheableMethod && req.Header.Get("range") == "" {
 		cachedResp, err := responseFromCache(cachedVal, req)
 		if err == nil {
 			if t.MarkCachedResponses {
