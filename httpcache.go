@@ -4,7 +4,7 @@
 // It is only suitable for use as a 'private' cache (i.e. for a web-browser or an API-client
 // and not for a shared proxy).
 //
-// 'max-stale' set on a request is not currently respected. (max-age and min-fresh both are)
+// 'max-stale' set on a request is not currently respected. (max-age and min-fresh both are.)
 package httpcache
 
 import (
