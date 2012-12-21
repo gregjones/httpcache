@@ -347,6 +347,6 @@ func (s *S) TestMinFreshWithExpires(c *C) {
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
 
 	reqHeaders = http.Header{}
-	reqHeaders.Set("cache-control", "min-fresh=3")
+	reqHeaders.Set("cache-control", "min-fresh=2")
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
 }
