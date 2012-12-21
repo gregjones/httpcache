@@ -293,8 +293,60 @@ func (s *S) TestFreshExpiration(c *C) {
 	now := time.Now()
 	respHeaders := http.Header{}
 	respHeaders.Set("date", now.Format(time.RFC1123))
-	respHeaders.Set("expires", now.Add(time.Duration(20)*time.Second).Format(time.RFC1123))
+	respHeaders.Set("expires", now.Add(time.Duration(2)*time.Second).Format(time.RFC1123))
 
 	reqHeaders := http.Header{}
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+
+	time.Sleep(3 * time.Second)
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
+
+func (s *S) TestMaxAge(c *C) {
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("cache-control", "max-age=2")
+
+	reqHeaders := http.Header{}
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+
+	time.Sleep(3 * time.Second)
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
+
+func (s *S) TestMaxAgeZero(c *C) {
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("cache-control", "max-age=0")
+
+	reqHeaders := http.Header{}
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
+
+func (s *S) TestBothMaxAge(c *C) {
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("cache-control", "max-age=2")
+
+	reqHeaders := http.Header{}
+	reqHeaders.Set("cache-control", "max-age=0")
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
+
+func (s *S) TestMinFreshWithExpires(c *C) {
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("expires", now.Add(time.Duration(2)*time.Second).Format(time.RFC1123))
+
+	reqHeaders := http.Header{}
+	reqHeaders.Set("cache-control", "min-fresh=1")
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+
+	reqHeaders = http.Header{}
+	reqHeaders.Set("cache-control", "min-fresh=3")
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
 }

@@ -254,8 +254,8 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 		if minfresh, ok := reqCacheControl["min-fresh"]; ok {
 			//  the client wants a response that will still be fresh for at least the specified number of seconds.
 			minfreshDuration, err := time.ParseDuration(minfresh + "s")
-			if err != nil {
-				currentAge = time.Duration(currentAge.Nanoseconds() + minfreshDuration.Nanoseconds())
+			if err == nil {
+				currentAge = time.Duration(currentAge + minfreshDuration)
 			}
 		}
 
