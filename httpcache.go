@@ -10,15 +10,12 @@ package httpcache
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"strings"
 	"sync"
 	"time"
 )
-
-var _ = fmt.Println
 
 const (
 	stale = iota
@@ -129,7 +126,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 
 			if varyMatches(cachedResp, req) {
 				// Can only use cached value if the new request doesn't Vary significantly
-				freshness := getfreshness(cachedResp.Header, req.Header)
+				freshness := getFreshness(cachedResp.Header, req.Header)
 				if freshness == fresh {
 					return cachedResp, nil
 				}
@@ -196,7 +193,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 	return resp, nil
 }
 
-// getfreshness will return one of fresh/stale/transparent based on the cache-control
+// getFreshness will return one of fresh/stale/transparent based on the cache-control
 // values of the request and the response
 // 
 // fresh indicates the response can be returned
@@ -207,7 +204,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 // signficant. Similarly, smax-age isn't used.
 //
 // Limitation: max-stale is not taken into account. It should be.
-func getfreshness(respHeaders, reqHeaders http.Header) (freshness int) {
+func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	respCacheControl := parseCacheControl(respHeaders)
 	reqCacheControl := parseCacheControl(reqHeaders)
 	if _, ok := reqCacheControl["no-cache"]; ok {
@@ -236,7 +233,8 @@ func getfreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 				lifetime = zeroDuration
 			}
 		} else {
-			if expiresHeader, ok := respCacheControl["expires"]; ok {
+			expiresHeader := respHeaders.Get("Expires")
+			if expiresHeader != "" {
 				expires, err := time.Parse(time.RFC1123, expiresHeader)
 				if err != nil {
 					lifetime = zeroDuration
