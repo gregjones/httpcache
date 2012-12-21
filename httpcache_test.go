@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"testing"
+	"time"
 )
 
 var _ = fmt.Print
@@ -250,4 +251,50 @@ func (s *S) TestParseCacheControl(c *C) {
 	cc = parseCacheControl(h)
 	c.Assert(cc["no-cache"], Equals, "1")
 	c.Assert(cc["max-age"], Equals, "3600")
+}
+
+func (s *S) TestNoCacheRequestExpiration(c *C) {
+	respHeaders := http.Header{}
+	respHeaders.Set("Cache-Control", "max-age=7200")
+	reqHeaders := http.Header{}
+	reqHeaders.Set("Cache-Control", "no-cache")
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, transparent)
+}
+
+func (s *S) TestNoCacheResponseExpiration(c *C) {
+	respHeaders := http.Header{}
+	respHeaders.Set("Cache-Control", "no-cache")
+	respHeaders.Set("Expires", "Wed, 19 Apr 3000 11:43:00 GMT")
+	reqHeaders := http.Header{}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
+
+func (s *S) TestReqMustRevalidate(c *C) {
+	// not paying attention to request setting max-stale means never returning stale
+	// responses, so always acting as if must-revalidate is set
+	respHeaders := http.Header{}
+	reqHeaders := http.Header{}
+	reqHeaders.Set("Cache-Control", "must-revalidate")
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
+
+func (s *S) TestRespMustRevalidate(c *C) {
+	respHeaders := http.Header{}
+	respHeaders.Set("Cache-Control", "must-revalidate")
+	reqHeaders := http.Header{}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
+
+func (s *S) TestFreshExpiration(c *C) {
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("expires", now.Add(time.Duration(20)*time.Second).Format(time.RFC1123))
+
+	reqHeaders := http.Header{}
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
 }
