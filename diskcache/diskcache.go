@@ -6,7 +6,6 @@ package diskcache
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"fmt"
 	"github.com/peterbourgon/diskv"
 	"io"
 )
@@ -17,9 +16,7 @@ type Cache struct {
 }
 
 func (c *Cache) Get(key string) (resp []byte, ok bool) {
-	fmt.Println(key)
 	key = keyToFilename(key)
-	fmt.Println("Get cache", key)
 	resp, err := c.d.Read(key)
 	if err != nil {
 		return []byte{}, false
@@ -29,7 +26,6 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 
 func (c *Cache) Set(key string, resp []byte) {
 	key = keyToFilename(key)
-	fmt.Println("Set cache ", key)
 	c.d.WriteAndSync(key, resp)
 }
 
@@ -46,7 +42,10 @@ func keyToFilename(key string) string {
 
 // New returns a new Cache that will store files in basePath
 func New(basePath string) *Cache {
-	d := diskv.New(diskv.Options{BasePath: basePath})
-	cache := &Cache{d: d}
-	return cache
+	return &Cache{
+		d: diskv.New(diskv.Options{
+			BasePath:     basePath,
+			CacheSizeMax: 100 * 1024 * 1024, // 100MB
+		}),
+	}
 }
