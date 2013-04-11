@@ -70,8 +70,6 @@ func NewMemoryCache() *MemoryCache {
 // Transport is an implementation of http.RoundTripper that will return values from a cache
 // where possible (avoiding a network request) and will additionally add validators (etag/if-modified-since)
 // to repeated requests allowing servers to return 304 / Not Modified
-//
-// Note: this means that both the request and response are potentially modified
 type Transport struct {
 	// The RoundTripper interface actually used to make requests
 	// If this follows redirects, then only the final response's cache-control will be taken into account
