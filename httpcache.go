@@ -1,4 +1,4 @@
-// Package httpcache provides a http.RoundTripper implementation that works as a 
+// Package httpcache provides a http.RoundTripper implementation that works as a
 // mostly RFC-compliant cache for http responses.
 //
 // It is only suitable for use as a 'private' cache (i.e. for a web-browser or an API-client
@@ -38,7 +38,7 @@ type Cache interface {
 
 // MemoryCache is an implemtation of Cache that stores responses in an in-memory map.
 type MemoryCache struct {
-	mu sync.RWMutex
+	mu    sync.RWMutex
 	items map[string][]byte
 }
 
@@ -194,7 +194,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 
 // getFreshness will return one of fresh/stale/transparent based on the cache-control
 // values of the request and the response
-// 
+//
 // fresh indicates the response can be returned
 // stale indicates that the response needs validating before it is returned
 // transparent indicates the response should not be used to fulfil the request
@@ -224,7 +224,7 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 		currentAge := time.Since(date)
 		var lifetime time.Duration
 		zeroDuration, _ := time.ParseDuration("0s")
-		// If a response includes both an Expires header and a max-age directive, 
+		// If a response includes both an Expires header and a max-age directive,
 		// the max-age directive overrides the Expires header, even if the Expires header is more restrictive.
 		if maxAge, ok := respCacheControl["max-age"]; ok {
 			lifetime, err = time.ParseDuration(maxAge + "s")
