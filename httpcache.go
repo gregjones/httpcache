@@ -72,7 +72,7 @@ func NewMemoryCache() *MemoryCache {
 // to repeated requests allowing servers to return 304 / Not Modified
 type Transport struct {
 	// The RoundTripper interface actually used to make requests
-	transport http.RoundTripper
+	Transport http.RoundTripper
 	cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
@@ -81,7 +81,7 @@ type Transport struct {
 // NewTransport returns a new Transport using the default HTTP Transport and the
 // provided Cache implementation, with MarkCachedResponses set to true
 func NewTransport(c Cache) *Transport {
-	t := &Transport{transport: http.DefaultTransport, cache: c, MarkCachedResponses: true}
+	t := &Transport{Transport: http.DefaultTransport, cache: c, MarkCachedResponses: true}
 	return t
 }
 
@@ -142,7 +142,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 				}
 			}
 
-			resp, err = t.transport.RoundTrip(req)
+			resp, err = t.Transport.RoundTrip(req)
 			if err == nil && req.Method == "GET" && resp.StatusCode == http.StatusNotModified {
 				// Replace the 304 response with the one from cache, but update with some new headers
 				headersToMerge := getHopByHopHeaders(resp)
@@ -164,7 +164,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		if _, ok := reqCacheControl["only-if-cached"]; ok {
 			resp = newGatewayTimeoutResponse(req)
 		} else {
-			resp, err = t.transport.RoundTrip(req)
+			resp, err = t.Transport.RoundTrip(req)
 		}
 	}
 	reqCacheControl := parseCacheControl(req.Header)
