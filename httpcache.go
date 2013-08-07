@@ -38,32 +38,32 @@ type Cache interface {
 
 // MemoryCache is an implemtation of Cache that stores responses in an in-memory map.
 type MemoryCache struct {
-	sync.RWMutex
+	mu sync.RWMutex
 	items map[string][]byte
 }
 
 func (c *MemoryCache) Get(key string) (resp []byte, ok bool) {
-	c.RLock()
-	defer c.RUnlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	resp, ok = c.items[key]
 	return resp, ok
 }
 
 func (c *MemoryCache) Set(key string, resp []byte) {
-	c.Lock()
-	defer c.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.items[key] = resp
 }
 
 func (c *MemoryCache) Delete(key string) {
-	c.Lock()
-	defer c.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	delete(c.items, key)
 }
 
 // NewMemoryCache returns a new Cache that will store items in an in-memory map
 func NewMemoryCache() *MemoryCache {
-	c := &MemoryCache{items: map[string][]byte{}, RWMutex: sync.RWMutex{}}
+	c := &MemoryCache{items: map[string][]byte{}}
 	return c
 }
 
