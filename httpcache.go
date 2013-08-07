@@ -73,7 +73,7 @@ func NewMemoryCache() *MemoryCache {
 type Transport struct {
 	// The RoundTripper interface actually used to make requests
 	Transport http.RoundTripper
-	cache     Cache
+	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
 }
@@ -81,7 +81,7 @@ type Transport struct {
 // NewTransport returns a new Transport using the default HTTP Transport and the
 // provided Cache implementation, with MarkCachedResponses set to true
 func NewTransport(c Cache) *Transport {
-	t := &Transport{Transport: http.DefaultTransport, cache: c, MarkCachedResponses: true}
+	t := &Transport{Transport: http.DefaultTransport, Cache: c, MarkCachedResponses: true}
 	return t
 }
 
@@ -109,11 +109,11 @@ func varyMatches(cachedResp *http.Response, req *http.Request) bool {
 func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	req = cloneRequest(req)
 	cacheKey := req.URL.String()
-	cachedVal, ok := t.cache.Get(cacheKey)
+	cachedVal, ok := t.Cache.Get(cacheKey)
 	cacheableMethod := req.Method == "GET" || req.Method == "HEAD"
 	if !cacheableMethod {
 		// Need to invalidate an existing value
-		t.cache.Delete(cacheKey)
+		t.Cache.Delete(cacheKey)
 	}
 	if ok && cacheableMethod && req.Header.Get("range") == "" {
 		cachedResp, err := responseFromCache(cachedVal, req)
@@ -155,7 +155,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 				resp = cachedResp
 			} else {
 				if err != nil || resp.StatusCode != http.StatusOK {
-					t.cache.Delete(cacheKey)
+					t.Cache.Delete(cacheKey)
 				}
 			}
 		}
@@ -182,10 +182,10 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 		respBytes, err := httputil.DumpResponse(resp, true)
 		if err == nil {
-			t.cache.Set(cacheKey, respBytes)
+			t.Cache.Set(cacheKey, respBytes)
 		}
 	} else {
-		t.cache.Delete(cacheKey)
+		t.Cache.Delete(cacheKey)
 	}
 	return resp, nil
 }

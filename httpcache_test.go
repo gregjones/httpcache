@@ -88,7 +88,7 @@ func (s *S) TearDownSuite(c *C) {
 }
 
 func (s *S) TearDownTest(c *C) {
-	s.transport.cache = NewMemoryCache()
+	s.transport.Cache = NewMemoryCache()
 }
 
 func (s *S) TestGetOnlyIfCachedHit(c *C) {
