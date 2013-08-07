@@ -72,7 +72,6 @@ func NewMemoryCache() *MemoryCache {
 // to repeated requests allowing servers to return 304 / Not Modified
 type Transport struct {
 	// The RoundTripper interface actually used to make requests
-	// If this follows redirects, then only the final response's cache-control will be taken into account
 	transport http.RoundTripper
 	cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
@@ -183,7 +182,6 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 		respBytes, err := httputil.DumpResponse(resp, true)
 		if err == nil {
-			// fmt.Println("Set cache", string(respBytes))
 			t.cache.Set(cacheKey, respBytes)
 		}
 	} else {
