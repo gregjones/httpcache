@@ -72,17 +72,17 @@ func NewMemoryCache() *MemoryCache {
 // to repeated requests allowing servers to return 304 / Not Modified
 type Transport struct {
 	// The RoundTripper interface actually used to make requests
+	// If nil, http.DefaultTransport is used
 	Transport http.RoundTripper
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
 }
 
-// NewTransport returns a new Transport using the default HTTP Transport and the
-// provided Cache implementation, with MarkCachedResponses set to true
+// NewTransport returns a new Transport with the
+// provided Cache implementation and MarkCachedResponses set to true
 func NewTransport(c Cache) *Transport {
-	t := &Transport{Transport: http.DefaultTransport, Cache: c, MarkCachedResponses: true}
-	return t
+	return &Transport{Cache: c, MarkCachedResponses: true}
 }
 
 // varyMatches will return false unless all of the cached values for the headers listed in Vary
@@ -115,6 +115,12 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		// Need to invalidate an existing value
 		t.Cache.Delete(cacheKey)
 	}
+
+	transport := t.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+
 	if ok && cacheableMethod && req.Header.Get("range") == "" {
 		cachedResp, err := responseFromCache(cachedVal, req)
 		if err == nil {
@@ -142,7 +148,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 				}
 			}
 
-			resp, err = t.Transport.RoundTrip(req)
+			resp, err = transport.RoundTrip(req)
 			if err == nil && req.Method == "GET" && resp.StatusCode == http.StatusNotModified {
 				// Replace the 304 response with the one from cache, but update with some new headers
 				headersToMerge := getHopByHopHeaders(resp)
@@ -164,7 +170,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		if _, ok := reqCacheControl["only-if-cached"]; ok {
 			resp = newGatewayTimeoutResponse(req)
 		} else {
-			resp, err = t.Transport.RoundTrip(req)
+			resp, err = transport.RoundTrip(req)
 		}
 	}
 	reqCacheControl := parseCacheControl(req.Header)
