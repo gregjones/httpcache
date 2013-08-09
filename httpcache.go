@@ -109,9 +109,12 @@ func varyMatches(cachedResp *http.Response, req *http.Request) bool {
 func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	req = cloneRequest(req)
 	cacheKey := req.URL.String()
-	cachedVal, ok := t.Cache.Get(cacheKey)
+	var cachedVal []byte
+	var ok bool
 	cacheableMethod := req.Method == "GET" || req.Method == "HEAD"
-	if !cacheableMethod {
+	if cacheableMethod {
+		cachedVal, ok = t.Cache.Get(cacheKey)
+	} else {
 		// Need to invalidate an existing value
 		t.Cache.Delete(cacheKey)
 	}
