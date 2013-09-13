@@ -36,6 +36,23 @@ type Cache interface {
 	Delete(key string)
 }
 
+// cacheKey returns the cache key for req.
+func cacheKey(req *http.Request) string {
+	return req.URL.String()
+}
+
+// CachedResponse returns the cached http.Response for req if present, and nil
+// otherwise.
+func CachedResponse(c Cache, req *http.Request) (resp *http.Response, err error) {
+	cachedVal, ok := c.Get(cacheKey(req))
+	if !ok {
+		return
+	}
+
+	b := bytes.NewBuffer(cachedVal)
+	return http.ReadResponse(bufio.NewReader(b), req)
+}
+
 // MemoryCache is an implemtation of Cache that stores responses in an in-memory map.
 type MemoryCache struct {
 	mu    sync.RWMutex
@@ -108,12 +125,11 @@ func varyMatches(cachedResp *http.Response, req *http.Request) bool {
 // will be returned.
 func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	req = cloneRequest(req)
-	cacheKey := req.URL.String()
-	var cachedVal []byte
-	var ok bool
+	cacheKey := cacheKey(req)
 	cacheableMethod := req.Method == "GET" || req.Method == "HEAD"
+	var cachedResp *http.Response
 	if cacheableMethod {
-		cachedVal, ok = t.Cache.Get(cacheKey)
+		cachedResp, err = CachedResponse(t.Cache, req)
 	} else {
 		// Need to invalidate an existing value
 		t.Cache.Delete(cacheKey)
@@ -124,48 +140,45 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		transport = http.DefaultTransport
 	}
 
-	if ok && cacheableMethod && req.Header.Get("range") == "" {
-		cachedResp, err := responseFromCache(cachedVal, req)
-		if err == nil {
-			if t.MarkCachedResponses {
-				cachedResp.Header.Set(XFromCache, "1")
+	if cachedResp != nil && err == nil && cacheableMethod && req.Header.Get("range") == "" {
+		if t.MarkCachedResponses {
+			cachedResp.Header.Set(XFromCache, "1")
+		}
+
+		if varyMatches(cachedResp, req) {
+			// Can only use cached value if the new request doesn't Vary significantly
+			freshness := getFreshness(cachedResp.Header, req.Header)
+			if freshness == fresh {
+				return cachedResp, nil
 			}
 
-			if varyMatches(cachedResp, req) {
-				// Can only use cached value if the new request doesn't Vary significantly
-				freshness := getFreshness(cachedResp.Header, req.Header)
-				if freshness == fresh {
-					return cachedResp, nil
+			if freshness == stale {
+				// Add validators if caller hasn't already done so
+				etag := cachedResp.Header.Get("etag")
+				if etag != "" && req.Header.Get("etag") == "" {
+					req.Header.Set("if-none-match", etag)
 				}
-
-				if freshness == stale {
-					// Add validators if caller hasn't already done so
-					etag := cachedResp.Header.Get("etag")
-					if etag != "" && req.Header.Get("etag") == "" {
-						req.Header.Set("if-none-match", etag)
-					}
-					lastModified := cachedResp.Header.Get("last-modified")
-					if lastModified != "" && req.Header.Get("last-modified") == "" {
-						req.Header.Set("if-modified-since", lastModified)
-					}
+				lastModified := cachedResp.Header.Get("last-modified")
+				if lastModified != "" && req.Header.Get("last-modified") == "" {
+					req.Header.Set("if-modified-since", lastModified)
 				}
 			}
+		}
 
-			resp, err = transport.RoundTrip(req)
-			if err == nil && req.Method == "GET" && resp.StatusCode == http.StatusNotModified {
-				// Replace the 304 response with the one from cache, but update with some new headers
-				headersToMerge := getHopByHopHeaders(resp)
-				for _, headerKey := range headersToMerge {
-					cachedResp.Header.Set(headerKey, resp.Header.Get(headerKey))
-				}
-				cachedResp.Status = http.StatusText(http.StatusOK)
-				cachedResp.StatusCode = http.StatusOK
+		resp, err = transport.RoundTrip(req)
+		if err == nil && req.Method == "GET" && resp.StatusCode == http.StatusNotModified {
+			// Replace the 304 response with the one from cache, but update with some new headers
+			headersToMerge := getHopByHopHeaders(resp)
+			for _, headerKey := range headersToMerge {
+				cachedResp.Header.Set(headerKey, resp.Header.Get(headerKey))
+			}
+			cachedResp.Status = http.StatusText(http.StatusOK)
+			cachedResp.StatusCode = http.StatusOK
 
-				resp = cachedResp
-			} else {
-				if err != nil || resp.StatusCode != http.StatusOK {
-					t.Cache.Delete(cacheKey)
-				}
+			resp = cachedResp
+		} else {
+			if err != nil || resp.StatusCode != http.StatusOK {
+				t.Cache.Delete(cacheKey)
 			}
 		}
 	} else {
@@ -294,12 +307,6 @@ func canStore(reqCacheControl, respCacheControl cacheControl) (canStore bool) {
 		return false
 	}
 	return true
-}
-
-func responseFromCache(cachedVal []byte, req *http.Request) (*http.Response, error) {
-	b := bytes.NewBuffer(cachedVal)
-	resp, err := http.ReadResponse(bufio.NewReader(b), req)
-	return resp, err
 }
 
 func newGatewayTimeoutResponse(req *http.Request) *http.Response {
