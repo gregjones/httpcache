@@ -4,6 +4,7 @@
 package diskcache
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"github.com/peterbourgon/diskv"
@@ -26,7 +27,7 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 
 func (c *Cache) Set(key string, resp []byte) {
 	key = keyToFilename(key)
-	c.d.WriteAndSync(key, resp)
+	c.d.WriteStream(key, bytes.NewReader(resp), true)
 }
 
 func (c *Cache) Delete(key string) {
