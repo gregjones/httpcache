@@ -16,6 +16,7 @@ type Cache struct {
 	d *diskv.Diskv
 }
 
+// Get returns the response corresponding to key if present
 func (c *Cache) Get(key string) (resp []byte, ok bool) {
 	key = keyToFilename(key)
 	resp, err := c.d.Read(key)
@@ -25,11 +26,13 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 	return resp, true
 }
 
+// Set saves a response to the cache as key
 func (c *Cache) Set(key string, resp []byte) {
 	key = keyToFilename(key)
 	c.d.WriteStream(key, bytes.NewReader(resp), true)
 }
 
+// Delete removes the response with key from the cache
 func (c *Cache) Delete(key string) {
 	key = keyToFilename(key)
 	c.d.Erase(key)

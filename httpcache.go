@@ -21,7 +21,7 @@ const (
 	stale = iota
 	fresh
 	transparent
-	// Header added to responses that are returned from the cache
+	// XFromCache is the header added to responses that are returned from the cache
 	XFromCache = "X-From-Cache"
 )
 
@@ -59,6 +59,7 @@ type MemoryCache struct {
 	items map[string][]byte
 }
 
+// Get returns the []byte representation of the response and true if present, false if not
 func (c *MemoryCache) Get(key string) (resp []byte, ok bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -66,12 +67,14 @@ func (c *MemoryCache) Get(key string) (resp []byte, ok bool) {
 	return resp, ok
 }
 
+// Set saves response resp to the cache with key
 func (c *MemoryCache) Set(key string, resp []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.items[key] = resp
 }
 
+// Delete removes key from the cache
 func (c *MemoryCache) Delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
