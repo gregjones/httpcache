@@ -10,6 +10,7 @@ package httpcache
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -215,6 +216,20 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 	return resp, nil
 }
 
+// ErrNoDateHeader indicates that the HTTP headers contained no Date header.
+var ErrNoDateHeader = errors.New("no Date header")
+
+// Date parses and returns the value of the Date header.
+func Date(respHeaders http.Header) (date time.Time, err error) {
+	dateHeader := respHeaders.Get("date")
+	if dateHeader == "" {
+		err = ErrNoDateHeader
+		return
+	}
+
+	return time.Parse(time.RFC1123, dateHeader)
+}
+
 // getFreshness will return one of fresh/stale/transparent based on the cache-control
 // values of the request and the response
 //
@@ -238,54 +253,54 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	if _, ok := reqCacheControl["only-if-cached"]; ok {
 		return fresh
 	}
-	dateHeader := respHeaders.Get("date")
-	if dateHeader != "" {
-		date, err := time.Parse(time.RFC1123, dateHeader)
-		if err != nil {
-			return stale
-		}
-		currentAge := time.Since(date)
-		var lifetime time.Duration
-		zeroDuration, _ := time.ParseDuration("0s")
-		// If a response includes both an Expires header and a max-age directive,
-		// the max-age directive overrides the Expires header, even if the Expires header is more restrictive.
-		if maxAge, ok := respCacheControl["max-age"]; ok {
-			lifetime, err = time.ParseDuration(maxAge + "s")
-			if err != nil {
-				lifetime = zeroDuration
-			}
-		} else {
-			expiresHeader := respHeaders.Get("Expires")
-			if expiresHeader != "" {
-				expires, err := time.Parse(time.RFC1123, expiresHeader)
-				if err != nil {
-					lifetime = zeroDuration
-				} else {
-					lifetime = expires.Sub(date)
-				}
-			}
-		}
 
-		if maxAge, ok := reqCacheControl["max-age"]; ok {
-			// the client is willing to accept a response whose age is no greater than the specified time in seconds
-			lifetime, err = time.ParseDuration(maxAge + "s")
-			if err != nil {
-				lifetime = zeroDuration
-			}
-		}
-		if minfresh, ok := reqCacheControl["min-fresh"]; ok {
-			//  the client wants a response that will still be fresh for at least the specified number of seconds.
-			minfreshDuration, err := time.ParseDuration(minfresh + "s")
-			if err == nil {
-				currentAge = time.Duration(currentAge + minfreshDuration)
-			}
-		}
-
-		if lifetime > currentAge {
-			return fresh
-		}
-
+	date, err := Date(respHeaders)
+	if err != nil {
+		return stale
 	}
+	currentAge := time.Since(date)
+
+	var lifetime time.Duration
+	var zeroDuration time.Duration
+
+	// If a response includes both an Expires header and a max-age directive,
+	// the max-age directive overrides the Expires header, even if the Expires header is more restrictive.
+	if maxAge, ok := respCacheControl["max-age"]; ok {
+		lifetime, err = time.ParseDuration(maxAge + "s")
+		if err != nil {
+			lifetime = zeroDuration
+		}
+	} else {
+		expiresHeader := respHeaders.Get("Expires")
+		if expiresHeader != "" {
+			expires, err := time.Parse(time.RFC1123, expiresHeader)
+			if err != nil {
+				lifetime = zeroDuration
+			} else {
+				lifetime = expires.Sub(date)
+			}
+		}
+	}
+
+	if maxAge, ok := reqCacheControl["max-age"]; ok {
+		// the client is willing to accept a response whose age is no greater than the specified time in seconds
+		lifetime, err = time.ParseDuration(maxAge + "s")
+		if err != nil {
+			lifetime = zeroDuration
+		}
+	}
+	if minfresh, ok := reqCacheControl["min-fresh"]; ok {
+		//  the client wants a response that will still be fresh for at least the specified number of seconds.
+		minfreshDuration, err := time.ParseDuration(minfresh + "s")
+		if err == nil {
+			currentAge = time.Duration(currentAge + minfreshDuration)
+		}
+	}
+
+	if lifetime > currentAge {
+		return fresh
+	}
+
 	return stale
 }
 
