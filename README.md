@@ -10,3 +10,10 @@ It is only suitable for use as a 'private' cache (i.e. for a web-browser or an A
 **Documentation:** http://godoc.org/github.com/gregjones/httpcache
 
 **License:** MIT (see LICENSE.txt)
+
+Cache backends
+--------------
+
+- The built-in 'memory' cache stores responses in an in-memory map.
+- https://github.com/gregjones/httpcache/diskcache provides a filesystem-backed cache using the [diskv](https://github.com/peterbourgon/diskv) library.
+- https://github.com/sourcegraph/s3cache uses Amazon S3 for storage.
