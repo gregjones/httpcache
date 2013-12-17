@@ -2,11 +2,12 @@ package httpcache
 
 import (
 	"fmt"
-	. "launchpad.net/gocheck"
-	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	. "launchpad.net/gocheck"
 )
 
 var _ = fmt.Print
@@ -14,7 +15,7 @@ var _ = fmt.Print
 func Test(t *testing.T) { TestingT(t) }
 
 type S struct {
-	listener  net.Listener
+	server    *httptest.Server
 	client    http.Client
 	transport *Transport
 }
@@ -27,21 +28,18 @@ func (s *S) SetUpSuite(c *C) {
 	s.transport = t
 	s.client = client
 
-	ln, err := net.Listen("tcp", ":9090")
-	if err != nil {
-		panic(err)
-	}
-	s.listener = ln
+	mux := http.NewServeMux()
+	s.server = httptest.NewServer(mux)
 
-	http.HandleFunc("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=3600")
 	}))
 
-	http.HandleFunc("/nostore", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/nostore", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 	}))
 
-	http.HandleFunc("/etag", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/etag", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		etag := "124567"
 		if r.Header.Get("if-none-match") == etag {
 			w.WriteHeader(http.StatusNotModified)
@@ -49,7 +47,7 @@ func (s *S) SetUpSuite(c *C) {
 		w.Header().Set("etag", etag)
 	}))
 
-	http.HandleFunc("/lastmodified", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/lastmodified", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		lm := "Fri, 14 Dec 2010 01:01:50 GMT"
 		if r.Header.Get("if-modified-since") == lm {
 			w.WriteHeader(http.StatusNotModified)
@@ -57,34 +55,29 @@ func (s *S) SetUpSuite(c *C) {
 		w.Header().Set("last-modified", lm)
 	}))
 
-	http.HandleFunc("/varyaccept", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/varyaccept", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=3600")
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Vary", "Accept")
 		w.Write([]byte("Some text content"))
 	}))
 
-	http.HandleFunc("/doublevary", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/doublevary", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=3600")
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Vary", "Accept, Accept-Language")
 		w.Write([]byte("Some text content"))
 	}))
-	http.HandleFunc("/varyunused", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/varyunused", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=3600")
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Vary", "X-Madeup-Header")
 		w.Write([]byte("Some text content"))
 	}))
-
-	go http.Serve(s.listener, nil)
 }
 
 func (s *S) TearDownSuite(c *C) {
-	err := s.listener.Close()
-	if err != nil {
-		panic(err)
-	}
+	s.server.Close()
 }
 
 func (s *S) TearDownTest(c *C) {
@@ -92,13 +85,13 @@ func (s *S) TearDownTest(c *C) {
 }
 
 func (s *S) TestGetOnlyIfCachedHit(c *C) {
-	req, err := http.NewRequest("GET", "http://localhost:9090/", nil)
+	req, err := http.NewRequest("GET", s.server.URL, nil)
 	c.Assert(err, IsNil)
 	resp, err := s.client.Do(req)
 	defer resp.Body.Close()
 	c.Assert(resp.Header.Get(XFromCache), Equals, "")
 
-	req2, err2 := http.NewRequest("GET", "http://localhost:9090/", nil)
+	req2, err2 := http.NewRequest("GET", s.server.URL, nil)
 	req2.Header.Add("cache-control", "only-if-cached")
 	resp2, err2 := s.client.Do(req)
 	defer resp2.Body.Close()
@@ -108,7 +101,7 @@ func (s *S) TestGetOnlyIfCachedHit(c *C) {
 }
 
 func (s *S) TestGetOnlyIfCachedMiss(c *C) {
-	req, err := http.NewRequest("GET", "http://localhost:9090/", nil)
+	req, err := http.NewRequest("GET", s.server.URL, nil)
 	req.Header.Add("cache-control", "only-if-cached")
 	resp, err := s.client.Do(req)
 	defer resp.Body.Close()
@@ -118,7 +111,7 @@ func (s *S) TestGetOnlyIfCachedMiss(c *C) {
 }
 
 func (s *S) TestGetNoStoreRequest(c *C) {
-	req, err := http.NewRequest("GET", "http://localhost:9090/", nil)
+	req, err := http.NewRequest("GET", s.server.URL, nil)
 	req.Header.Add("Cache-Control", "no-store")
 	resp, err := s.client.Do(req)
 	defer resp.Body.Close()
@@ -132,7 +125,7 @@ func (s *S) TestGetNoStoreRequest(c *C) {
 }
 
 func (s *S) TestGetNoStoreResponse(c *C) {
-	req, err := http.NewRequest("GET", "http://localhost:9090/nostore", nil)
+	req, err := http.NewRequest("GET", s.server.URL+"/nostore", nil)
 	resp, err := s.client.Do(req)
 	defer resp.Body.Close()
 	c.Assert(err, IsNil)
@@ -145,7 +138,7 @@ func (s *S) TestGetNoStoreResponse(c *C) {
 }
 
 func (s *S) TestGetWithEtag(c *C) {
-	req, err := http.NewRequest("GET", "http://localhost:9090/etag", nil)
+	req, err := http.NewRequest("GET", s.server.URL+"/etag", nil)
 	resp, err := s.client.Do(req)
 	defer resp.Body.Close()
 	c.Assert(err, IsNil)
@@ -158,7 +151,7 @@ func (s *S) TestGetWithEtag(c *C) {
 }
 
 func (s *S) TestGetWithLastModified(c *C) {
-	req, err := http.NewRequest("GET", "http://localhost:9090/lastmodified", nil)
+	req, err := http.NewRequest("GET", s.server.URL+"/lastmodified", nil)
 	resp, err := s.client.Do(req)
 	defer resp.Body.Close()
 	c.Assert(err, IsNil)
@@ -171,7 +164,7 @@ func (s *S) TestGetWithLastModified(c *C) {
 }
 
 func (s *S) TestGetWithVary(c *C) {
-	req, err := http.NewRequest("GET", "http://localhost:9090/varyaccept", nil)
+	req, err := http.NewRequest("GET", s.server.URL+"/varyaccept", nil)
 	req.Header.Set("Accept", "text/plain")
 	resp, err := s.client.Do(req)
 	defer resp.Body.Close()
@@ -197,7 +190,7 @@ func (s *S) TestGetWithVary(c *C) {
 }
 
 func (s *S) TestGetWithDoubleVary(c *C) {
-	req, err := http.NewRequest("GET", "http://localhost:9090/doublevary", nil)
+	req, err := http.NewRequest("GET", s.server.URL+"/doublevary", nil)
 	req.Header.Set("Accept", "text/plain")
 	req.Header.Set("Accept-Language", "da, en-gb;q=0.8, en;q=0.7")
 	resp, err := s.client.Do(req)
@@ -224,7 +217,7 @@ func (s *S) TestGetWithDoubleVary(c *C) {
 }
 
 func (s *S) TestGetVaryUnused(c *C) {
-	req, err := http.NewRequest("GET", "http://localhost:9090/varyunused", nil)
+	req, err := http.NewRequest("GET", s.server.URL+"/varyunused", nil)
 	req.Header.Set("Accept", "text/plain")
 	resp, err := s.client.Do(req)
 	defer resp.Body.Close()
