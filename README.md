@@ -16,4 +16,5 @@ Cache backends
 
 - The built-in 'memory' cache stores responses in an in-memory map.
 - https://github.com/gregjones/httpcache/diskcache provides a filesystem-backed cache using the [diskv](https://github.com/peterbourgon/diskv) library.
+- https://github.com/gregjones/httpcache/memcache provides memcache implementations, for both App Engine and 'normal' memcache servers
 - https://github.com/sourcegraph/s3cache uses Amazon S3 for storage.
