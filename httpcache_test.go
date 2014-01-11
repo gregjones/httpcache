@@ -20,6 +20,14 @@ type S struct {
 	transport *Transport
 }
 
+type fakeClock struct {
+	elapsed time.Duration
+}
+
+func (c *fakeClock) since(t time.Time) time.Duration {
+	return c.elapsed
+}
+
 var _ = Suite(&S{})
 
 func (s *S) SetUpSuite(c *C) {
@@ -82,6 +90,7 @@ func (s *S) TearDownSuite(c *C) {
 
 func (s *S) TearDownTest(c *C) {
 	s.transport.Cache = NewMemoryCache()
+	clock = &realClock{}
 }
 
 func (s *S) TestGetOnlyIfCachedHit(c *C) {
@@ -291,7 +300,7 @@ func (s *S) TestFreshExpiration(c *C) {
 	reqHeaders := http.Header{}
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
 
-	time.Sleep(3 * time.Second)
+	clock = &fakeClock{elapsed: 3 * time.Second}
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
 }
 
@@ -304,7 +313,7 @@ func (s *S) TestMaxAge(c *C) {
 	reqHeaders := http.Header{}
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
 
-	time.Sleep(3 * time.Second)
+	clock = &fakeClock{elapsed: 3 * time.Second}
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
 }
 
