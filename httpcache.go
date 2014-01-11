@@ -242,6 +242,18 @@ func Date(respHeaders http.Header) (date time.Time, err error) {
 	return time.Parse(time.RFC1123, dateHeader)
 }
 
+type realClock struct{}
+
+func (c *realClock) since(d time.Time) time.Duration {
+	return time.Since(d)
+}
+
+type timer interface {
+	since(d time.Time) time.Duration
+}
+
+var clock timer = &realClock{}
+
 // getFreshness will return one of fresh/stale/transparent based on the cache-control
 // values of the request and the response
 //
@@ -270,7 +282,7 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	if err != nil {
 		return stale
 	}
-	currentAge := time.Since(date)
+	currentAge := clock.since(date)
 
 	var lifetime time.Duration
 	var zeroDuration time.Duration
