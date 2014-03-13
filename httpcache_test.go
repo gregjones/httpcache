@@ -357,3 +357,42 @@ func (s *S) TestMinFreshWithExpires(c *C) {
 	reqHeaders.Set("cache-control", "min-fresh=2")
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
 }
+
+func (s *S) TestEmptyMaxStale(c *C) {
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("cache-control", "max-age=20")
+
+	reqHeaders := http.Header{}
+	reqHeaders.Set("cache-control", "max-stale")
+
+	clock = &fakeClock{elapsed: 10 * time.Second}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+
+	clock = &fakeClock{elapsed: 60 * time.Second}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, asFresh)
+}
+
+func (s *S) TestMaxStaleValue(c *C) {
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("cache-control", "max-age=10")
+
+	reqHeaders := http.Header{}
+	reqHeaders.Set("cache-control", "max-stale=20")
+	clock = &fakeClock{elapsed: 5 * time.Second}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+
+	clock = &fakeClock{elapsed: 15 * time.Second}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, asFresh)
+
+	clock = &fakeClock{elapsed: 30 * time.Second}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
