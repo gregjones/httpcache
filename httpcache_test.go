@@ -247,11 +247,16 @@ func (s *S) TestParseCacheControl(c *C) {
 
 	h.Set("cache-control", "no-cache")
 	cc := parseCacheControl(h)
-	c.Assert(cc["no-cache"], Equals, "1")
+	if _, ok := cc["foo"]; ok {
+		c.Error("Value shouldn't exist")
+	}
+	if nocache, ok := cc["no-cache"]; ok {
+		c.Assert(nocache, Equals, "")
+	}
 
 	h.Set("cache-control", "no-cache, max-age=3600")
 	cc = parseCacheControl(h)
-	c.Assert(cc["no-cache"], Equals, "1")
+	c.Assert(cc["no-cache"], Equals, "")
 	c.Assert(cc["max-age"], Equals, "3600")
 }
 

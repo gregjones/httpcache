@@ -390,7 +390,7 @@ func parseCacheControl(headers http.Header) cacheControl {
 			keyval := strings.Split(part, "=")
 			cc[strings.Trim(keyval[0], " ")] = strings.Trim(keyval[1], ",")
 		} else {
-			cc[part] = "1"
+			cc[part] = ""
 		}
 	}
 	return cc
