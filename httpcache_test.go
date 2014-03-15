@@ -373,7 +373,7 @@ func (s *S) TestEmptyMaxStale(c *C) {
 
 	clock = &fakeClock{elapsed: 60 * time.Second}
 
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, asFresh)
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
 }
 
 func (s *S) TestMaxStaleValue(c *C) {
@@ -390,7 +390,7 @@ func (s *S) TestMaxStaleValue(c *C) {
 
 	clock = &fakeClock{elapsed: 15 * time.Second}
 
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, asFresh)
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
 
 	clock = &fakeClock{elapsed: 30 * time.Second}
 

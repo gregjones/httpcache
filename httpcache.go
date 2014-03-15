@@ -21,7 +21,6 @@ const (
 	stale = iota
 	fresh
 	transparent
-	asFresh
 	// XFromCache is the header added to responses that are returned from the cache
 	XFromCache = "X-From-Cache"
 )
@@ -157,7 +156,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		if varyMatches(cachedResp, req) {
 			// Can only use cached value if the new request doesn't Vary significantly
 			freshness := getFreshness(cachedResp.Header, req.Header)
-			if freshness == fresh || freshness == asFresh {
+			if freshness == fresh {
 				return cachedResp, nil
 			}
 
@@ -260,7 +259,6 @@ var clock timer = &realClock{}
 // fresh indicates the response can be returned
 // stale indicates that the response needs validating before it is returned
 // transparent indicates the response should not be used to fulfil the request
-// asFresh indicates the response is stale but can be returned
 //
 // Because this is only a private cache, 'public' and 'private' in cache-control aren't
 // signficant. Similarly, smax-age isn't used.
@@ -320,10 +318,6 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 		}
 	}
 
-	if lifetime > currentAge {
-		return fresh
-	}
-
 	if maxstale, ok := reqCacheControl["max-stale"]; ok {
 		// Indicates that the client is willing to accept a response that has exceeded its expiration time.
 		// If max-stale is assigned a value, then the client is willing to accept a response that has exceeded
@@ -331,9 +325,10 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 		// If no value is assigned to max-stale, then the client is willing to accept a stale response of any age.
 		//
 		// Responses served only because of a max-stale value are supposed to have a Warning header added to them,
-		// but that seems like a  hassle, and is it actually useful?
+		// but that seems like a  hassle, and is it actually useful? If so, then there needs to be a different
+		// return-value available here.
 		if maxstale == "" {
-			return asFresh
+			return fresh
 		}
 		maxstaleDuration, err := time.ParseDuration(maxstale + "s")
 		if err == nil {
@@ -342,7 +337,7 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	}
 
 	if lifetime > currentAge {
-		return asFresh
+		return fresh
 	}
 
 	return stale
