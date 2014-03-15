@@ -4,7 +4,6 @@
 // It is only suitable for use as a 'private' cache (i.e. for a web-browser or an API-client
 // and not for a shared proxy).
 //
-// 'max-stale' set on a request is not currently respected. (max-age and min-fresh both are.)
 package httpcache
 
 import (
@@ -263,8 +262,6 @@ var clock timer = &realClock{}
 //
 // Because this is only a private cache, 'public' and 'private' in cache-control aren't
 // signficant. Similarly, smax-age isn't used.
-//
-// Limitation: max-stale is not taken into account. It should be.
 func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	respCacheControl := parseCacheControl(respHeaders)
 	reqCacheControl := parseCacheControl(reqHeaders)
@@ -318,6 +315,24 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 		minfreshDuration, err := time.ParseDuration(minfresh + "s")
 		if err == nil {
 			currentAge = time.Duration(currentAge + minfreshDuration)
+		}
+	}
+
+	if maxstale, ok := reqCacheControl["max-stale"]; ok {
+		// Indicates that the client is willing to accept a response that has exceeded its expiration time.
+		// If max-stale is assigned a value, then the client is willing to accept a response that has exceeded
+		// its expiration time by no more than the specified number of seconds.
+		// If no value is assigned to max-stale, then the client is willing to accept a stale response of any age.
+		//
+		// Responses served only because of a max-stale value are supposed to have a Warning header added to them,
+		// but that seems like a  hassle, and is it actually useful? If so, then there needs to be a different
+		// return-value available here.
+		if maxstale == "" {
+			return fresh
+		}
+		maxstaleDuration, err := time.ParseDuration(maxstale + "s")
+		if err == nil {
+			currentAge = time.Duration(currentAge - maxstaleDuration)
 		}
 	}
 
@@ -390,7 +405,7 @@ func parseCacheControl(headers http.Header) cacheControl {
 			keyval := strings.Split(part, "=")
 			cc[strings.Trim(keyval[0], " ")] = strings.Trim(keyval[1], ",")
 		} else {
-			cc[part] = "1"
+			cc[part] = ""
 		}
 	}
 	return cc

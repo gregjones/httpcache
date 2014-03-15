@@ -247,11 +247,16 @@ func (s *S) TestParseCacheControl(c *C) {
 
 	h.Set("cache-control", "no-cache")
 	cc := parseCacheControl(h)
-	c.Assert(cc["no-cache"], Equals, "1")
+	if _, ok := cc["foo"]; ok {
+		c.Error("Value shouldn't exist")
+	}
+	if nocache, ok := cc["no-cache"]; ok {
+		c.Assert(nocache, Equals, "")
+	}
 
 	h.Set("cache-control", "no-cache, max-age=3600")
 	cc = parseCacheControl(h)
-	c.Assert(cc["no-cache"], Equals, "1")
+	c.Assert(cc["no-cache"], Equals, "")
 	c.Assert(cc["max-age"], Equals, "3600")
 }
 
@@ -350,5 +355,44 @@ func (s *S) TestMinFreshWithExpires(c *C) {
 
 	reqHeaders = http.Header{}
 	reqHeaders.Set("cache-control", "min-fresh=2")
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
+
+func (s *S) TestEmptyMaxStale(c *C) {
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("cache-control", "max-age=20")
+
+	reqHeaders := http.Header{}
+	reqHeaders.Set("cache-control", "max-stale")
+
+	clock = &fakeClock{elapsed: 10 * time.Second}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+
+	clock = &fakeClock{elapsed: 60 * time.Second}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+}
+
+func (s *S) TestMaxStaleValue(c *C) {
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("cache-control", "max-age=10")
+
+	reqHeaders := http.Header{}
+	reqHeaders.Set("cache-control", "max-stale=20")
+	clock = &fakeClock{elapsed: 5 * time.Second}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+
+	clock = &fakeClock{elapsed: 15 * time.Second}
+
+	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+
+	clock = &fakeClock{elapsed: 30 * time.Second}
+
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
 }
