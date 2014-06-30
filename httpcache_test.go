@@ -157,6 +157,11 @@ func (s *S) TestGetWithEtag(c *C) {
 	defer resp2.Body.Close()
 	c.Assert(err2, IsNil)
 	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
+
+	// additional assertions to verify that 304 response is converted properly
+	c.Assert(resp2.Status, Equals, "200 OK")
+	_, ok := resp2.Header["Connection"]
+	c.Assert(ok, Equals, false)
 }
 
 func (s *S) TestGetWithLastModified(c *C) {
