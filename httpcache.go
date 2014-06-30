@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -178,9 +179,12 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			// Replace the 304 response with the one from cache, but update with some new headers
 			headersToMerge := getHopByHopHeaders(resp)
 			for _, headerKey := range headersToMerge {
-				cachedResp.Header.Set(headerKey, resp.Header.Get(headerKey))
+				key := http.CanonicalHeaderKey(headerKey)
+				if v, ok := resp.Header[key]; ok {
+					cachedResp.Header[key] = v
+				}
 			}
-			cachedResp.Status = http.StatusText(http.StatusOK)
+			cachedResp.Status = fmt.Sprintf("%d %s", http.StatusOK, http.StatusText(http.StatusOK))
 			cachedResp.StatusCode = http.StatusOK
 
 			resp = cachedResp
