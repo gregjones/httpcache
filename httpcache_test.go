@@ -401,3 +401,18 @@ func (s *S) TestMaxStaleValue(c *C) {
 
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
 }
+
+func (s *S) TestGetAndHeadSameUrl(c *C) {
+	req, err := http.NewRequest("HEAD", s.server.URL+"/", nil)
+	req.Header.Set("Accept", "text/plain")
+	resp, err := s.client.Do(req)
+	defer resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.Header.Get(XFromCache), Equals, "")
+
+	req2, err := http.NewRequest("GET", s.server.URL+"/", nil)
+	resp2, err2 := s.client.Do(req2)
+	defer resp2.Body.Close()
+	c.Assert(err2, IsNil)
+	c.Assert(resp2.Header.Get(XFromCache), Equals, "")
+}
