@@ -133,6 +133,23 @@ func (s *S) TestGetNoStoreRequest(c *C) {
 	c.Assert(resp2.Header.Get(XFromCache), Equals, "")
 }
 
+func (s *S) TestGetNoStoreRequestWithIgnoreCacheControl(c *C) {
+	s.transport.IgnoreControlCache = true
+
+	req, err := http.NewRequest("GET", s.server.URL, nil)
+	req.Header.Add("Cache-Control", "no-store")
+	resp, err := s.client.Do(req)
+	defer resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.Header.Get(XFromCache), Equals, "")
+
+	resp2, err2 := s.client.Do(req)
+	defer resp2.Body.Close()
+	c.Assert(err2, IsNil)
+	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
+	c.Assert(resp2.StatusCode, Equals, 200)
+}
+
 func (s *S) TestGetNoStoreResponse(c *C) {
 	req, err := http.NewRequest("GET", s.server.URL+"/nostore", nil)
 	resp, err := s.client.Do(req)

@@ -98,6 +98,8 @@ type Transport struct {
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
+	// If true, the Cache-Control header will be ignored
+	IgnoreControlCache bool
 }
 
 // NewTransport returns a new Transport with the
@@ -208,10 +210,15 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 	}
 
-	reqCacheControl := parseCacheControl(req.Header)
-	respCacheControl := parseCacheControl(resp.Header)
+	isStorable := true
+	if !t.IgnoreControlCache {
+		reqCacheControl := parseCacheControl(req.Header)
+		respCacheControl := parseCacheControl(resp.Header)
 
-	if canStore(reqCacheControl, respCacheControl) {
+		isStorable = canStore(reqCacheControl, respCacheControl)
+	}
+
+	if isStorable {
 		vary := resp.Header.Get("Vary")
 		for _, varyKey := range strings.Split(vary, ",") {
 			varyKey = http.CanonicalHeaderKey(strings.Trim(varyKey, " "))
