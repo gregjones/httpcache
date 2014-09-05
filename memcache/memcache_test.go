@@ -8,7 +8,7 @@ import (
 	"net"
 	"testing"
 
-	. "launchpad.net/gocheck"
+	. "gopkg.in/check.v1"
 )
 
 const testServer = "localhost:11211"
