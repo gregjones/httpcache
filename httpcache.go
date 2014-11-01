@@ -114,9 +114,8 @@ func (t *Transport) Client() *http.Client {
 // varyMatches will return false unless all of the cached values for the headers listed in Vary
 // match the new request
 func varyMatches(cachedResp *http.Response, req *http.Request) bool {
-	respVarys := cachedResp.Header.Get("vary")
-	for _, header := range strings.Split(respVarys, ",") {
-		header = http.CanonicalHeaderKey(strings.Trim(header, " "))
+	for _, header := range headerAllCommaSepValues(cachedResp.Header, "vary") {
+		header = http.CanonicalHeaderKey(header)
 		if header != "" && req.Header.Get(header) != cachedResp.Header.Get("X-Varied-"+header) {
 			return false
 		}
@@ -212,9 +211,8 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 	respCacheControl := parseCacheControl(resp.Header)
 
 	if canStore(reqCacheControl, respCacheControl) {
-		vary := resp.Header.Get("Vary")
-		for _, varyKey := range strings.Split(vary, ",") {
-			varyKey = http.CanonicalHeaderKey(strings.Trim(varyKey, " "))
+		for _, varyKey := range headerAllCommaSepValues(resp.Header, "vary") {
+			varyKey = http.CanonicalHeaderKey(varyKey)
 			fakeHeader := "X-Varied-" + varyKey
 			reqValue := req.Header.Get(varyKey)
 			if reqValue != "" {
@@ -413,6 +411,24 @@ func parseCacheControl(headers http.Header) cacheControl {
 		}
 	}
 	return cc
+}
+
+// headerAllCommaSepValues returns all comma-separated values (each
+// with whitespace trimmed) for header name in headers. According to
+// Section 4.2 of the HTTP/1.1 spec
+// (http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2),
+// values from multiple occurrences of a header should be concatenated, if
+// the header's value is a comma-separated list.
+func headerAllCommaSepValues(headers http.Header, name string) []string {
+	var vals []string
+	for _, val := range headers[http.CanonicalHeaderKey(name)] {
+		fields := strings.Split(val, ",")
+		for i, f := range fields {
+			fields[i] = strings.TrimSpace(f)
+		}
+		vals = append(vals, fields...)
+	}
+	return vals
 }
 
 // NewMemoryCacheTransport returns a new Transport using the in-memory cache implementation
