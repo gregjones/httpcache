@@ -76,6 +76,13 @@ func (s *S) SetUpSuite(c *C) {
 		w.Header().Set("Vary", "Accept, Accept-Language")
 		w.Write([]byte("Some text content"))
 	}))
+	mux.HandleFunc("/2varyheaders", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Add("Vary", "Accept")
+		w.Header().Add("Vary", "Accept-Language")
+		w.Write([]byte("Some text content"))
+	}))
 	mux.HandleFunc("/varyunused", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=3600")
 		w.Header().Set("Content-Type", "text/plain")
@@ -228,6 +235,57 @@ func (s *S) TestGetWithDoubleVary(c *C) {
 	defer resp4.Body.Close()
 	c.Assert(err4, IsNil)
 	c.Assert(resp4.Header.Get(XFromCache), Equals, "")
+}
+
+func (s *S) TestGetWith2VaryHeaders(c *C) {
+	// Tests that multiple Vary headers' comma-separated lists are
+	// merged. See https://github.com/gregjones/httpcache/issues/27.
+	const (
+		accept         = "text/plain"
+		acceptLanguage = "da, en-gb;q=0.8, en;q=0.7"
+	)
+	req, err := http.NewRequest("GET", s.server.URL+"/2varyheaders", nil)
+	req.Header.Set("Accept", accept)
+	req.Header.Set("Accept-Language", acceptLanguage)
+	resp, err := s.client.Do(req)
+	defer resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.Header.Get("Vary"), Not(Equals), "")
+
+	resp2, err2 := s.client.Do(req)
+	defer resp2.Body.Close()
+	c.Assert(err2, IsNil)
+	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
+
+	req.Header.Set("Accept-Language", "")
+	resp3, err3 := s.client.Do(req)
+	defer resp3.Body.Close()
+	c.Assert(err3, IsNil)
+	c.Assert(resp3.Header.Get(XFromCache), Equals, "")
+
+	req.Header.Set("Accept-Language", "da")
+	resp4, err4 := s.client.Do(req)
+	defer resp4.Body.Close()
+	c.Assert(err4, IsNil)
+	c.Assert(resp4.Header.Get(XFromCache), Equals, "")
+
+	req.Header.Set("Accept-Language", acceptLanguage)
+	req.Header.Set("Accept", "")
+	resp5, err5 := s.client.Do(req)
+	defer resp5.Body.Close()
+	c.Assert(err5, IsNil)
+	c.Assert(resp5.Header.Get(XFromCache), Equals, "")
+
+	req.Header.Set("Accept", "image/png")
+	resp6, err6 := s.client.Do(req)
+	defer resp6.Body.Close()
+	c.Assert(err6, IsNil)
+	c.Assert(resp6.Header.Get(XFromCache), Equals, "")
+
+	resp7, err7 := s.client.Do(req)
+	defer resp7.Body.Close()
+	c.Assert(err7, IsNil)
+	c.Assert(resp7.Header.Get(XFromCache), Equals, "1")
 }
 
 func (s *S) TestGetVaryUnused(c *C) {
