@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -88,6 +89,18 @@ func (s *S) SetUpSuite(c *C) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Vary", "X-Madeup-Header")
 		w.Write([]byte("Some text content"))
+	}))
+
+	updateFieldsCounter := 0
+	mux.HandleFunc("/updatefields", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Counter", strconv.Itoa(updateFieldsCounter))
+		w.Header().Set("Etag", `"e"`)
+		updateFieldsCounter++
+		if r.Header.Get("if-none-match") != "" {
+			w.WriteHeader(http.StatusNotModified)
+		} else {
+			w.Write([]byte("Some text content"))
+		}
 	}))
 }
 
@@ -300,6 +313,22 @@ func (s *S) TestGetVaryUnused(c *C) {
 	defer resp2.Body.Close()
 	c.Assert(err2, IsNil)
 	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
+}
+
+func (s *S) TestUpdateFields(c *C) {
+	req, err := http.NewRequest("GET", s.server.URL+"/updatefields", nil)
+	resp, err := s.client.Do(req)
+	defer resp.Body.Close()
+	c.Assert(err, IsNil)
+	counter := resp.Header.Get("x-counter")
+
+	resp2, err2 := s.client.Do(req)
+	defer resp2.Body.Close()
+	c.Assert(err2, IsNil)
+	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
+	counter2 := resp2.Header.Get("x-counter")
+
+	c.Assert(counter, Not(Equals), counter2)
 }
 
 func (s *S) TestParseCacheControl(c *C) {
