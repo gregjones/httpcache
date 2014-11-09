@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -88,6 +89,18 @@ func (s *S) SetUpSuite(c *C) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Vary", "X-Madeup-Header")
 		w.Write([]byte("Some text content"))
+	}))
+
+	updateFieldsCounter := 0
+	mux.HandleFunc("/updatefields", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Counter", strconv.Itoa(updateFieldsCounter))
+		w.Header().Set("Etag", `"e"`)
+		updateFieldsCounter++
+		if r.Header.Get("if-none-match") != "" {
+			w.WriteHeader(http.StatusNotModified)
+		} else {
+			w.Write([]byte("Some text content"))
+		}
 	}))
 }
 
@@ -302,6 +315,22 @@ func (s *S) TestGetVaryUnused(c *C) {
 	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
 }
 
+func (s *S) TestUpdateFields(c *C) {
+	req, err := http.NewRequest("GET", s.server.URL+"/updatefields", nil)
+	resp, err := s.client.Do(req)
+	defer resp.Body.Close()
+	c.Assert(err, IsNil)
+	counter := resp.Header.Get("x-counter")
+
+	resp2, err2 := s.client.Do(req)
+	defer resp2.Body.Close()
+	c.Assert(err2, IsNil)
+	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
+	counter2 := resp2.Header.Get("x-counter")
+
+	c.Assert(counter, Not(Equals), counter2)
+}
+
 func (s *S) TestParseCacheControl(c *C) {
 	h := http.Header{}
 	for _ = range parseCacheControl(h) {
@@ -458,4 +487,55 @@ func (s *S) TestMaxStaleValue(c *C) {
 	clock = &fakeClock{elapsed: 30 * time.Second}
 
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+}
+
+type containsHeaderChecker struct {
+	*CheckerInfo
+}
+
+func (c *containsHeaderChecker) Check(params []interface{}, names []string) (bool, string) {
+	items, ok := params[0].([]string)
+	if !ok {
+		return false, "Expected first param to be []string"
+	}
+	value, ok := params[1].(string)
+	if !ok {
+		return false, "Expected 2nd param to be string"
+	}
+	return containsHeader(items, value), ""
+}
+
+var ContainsHeader Checker = &containsHeaderChecker{&CheckerInfo{Name: "Contains", Params: []string{"Container", "expected to contain"}}}
+
+func (s *S) TestGetEndToEndHeaders(c *C) {
+	var (
+		headers http.Header
+		end2end []string
+	)
+
+	headers = http.Header{}
+	headers.Set("content-type", "text/html")
+	headers.Set("te", "deflate")
+
+	end2end = getEndToEndHeaders(headers)
+	c.Check(end2end, ContainsHeader, "content-type")
+	c.Check(end2end, Not(ContainsHeader), "te")
+
+	headers = http.Header{}
+	headers.Set("connection", "content-type")
+	headers.Set("content-type", "text/csv")
+	headers.Set("te", "deflate")
+	end2end = getEndToEndHeaders(headers)
+	c.Check(end2end, Not(ContainsHeader), "connection")
+	c.Check(end2end, Not(ContainsHeader), "content-type")
+	c.Check(end2end, Not(ContainsHeader), "te")
+
+	headers = http.Header{}
+	end2end = getEndToEndHeaders(headers)
+	c.Check(end2end, HasLen, 0)
+
+	headers = http.Header{}
+	headers.Set("connection", "content-type")
+	end2end = getEndToEndHeaders(headers)
+	c.Check(end2end, HasLen, 0)
 }

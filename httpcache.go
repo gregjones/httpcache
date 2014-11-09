@@ -176,12 +176,9 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		resp, err = transport.RoundTrip(req)
 		if err == nil && req.Method == "GET" && resp.StatusCode == http.StatusNotModified {
 			// Replace the 304 response with the one from cache, but update with some new headers
-			headersToMerge := getHopByHopHeaders(resp)
-			for _, headerKey := range headersToMerge {
-				key := http.CanonicalHeaderKey(headerKey)
-				if v, ok := resp.Header[key]; ok {
-					cachedResp.Header[key] = v
-				}
+			endToEndHeaders := getEndToEndHeaders(resp.Header)
+			for _, header := range endToEndHeaders {
+				cachedResp.Header[header] = resp.Header[header]
 			}
 			cachedResp.Status = fmt.Sprintf("%d %s", http.StatusOK, http.StatusText(http.StatusOK))
 			cachedResp.StatusCode = http.StatusOK
@@ -345,17 +342,32 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	return stale
 }
 
-func getHopByHopHeaders(resp *http.Response) []string {
-	// These headers are always hop-by-hop
-	headers := []string{"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
-
-	for _, extra := range strings.Split(resp.Header.Get("connection"), ",") {
-		// any header listed in connection, if present, is also considered hop-by-hop
-		if strings.Trim(extra, " ") != "" {
-			headers = append(headers, extra)
+func containsHeader(headers []string, header string) bool {
+	for _, v := range headers {
+		if http.CanonicalHeaderKey(v) == http.CanonicalHeaderKey(header) {
+			return true
 		}
 	}
-	return headers
+	return false
+}
+
+func getEndToEndHeaders(respHeaders http.Header) []string {
+	// These headers are always hop-by-hop
+	hopByHopHeaders := []string{"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
+
+	for _, extra := range strings.Split(respHeaders.Get("connection"), ",") {
+		// any header listed in connection, if present, is also considered hop-by-hop
+		if strings.Trim(extra, " ") != "" {
+			hopByHopHeaders = append(hopByHopHeaders, extra)
+		}
+	}
+	endToEndHeaders := []string{}
+	for respHeader, _ := range respHeaders {
+		if !containsHeader(hopByHopHeaders, respHeader) {
+			endToEndHeaders = append(endToEndHeaders, respHeader)
+		}
+	}
+	return endToEndHeaders
 }
 
 func canStore(reqCacheControl, respCacheControl cacheControl) (canStore bool) {
