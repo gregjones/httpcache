@@ -342,28 +342,28 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	return stale
 }
 
-func containsHeader(headers []string, header string) bool {
-	for _, v := range headers {
-		if http.CanonicalHeaderKey(v) == http.CanonicalHeaderKey(header) {
-			return true
-		}
-	}
-	return false
-}
-
 func getEndToEndHeaders(respHeaders http.Header) []string {
 	// These headers are always hop-by-hop
-	hopByHopHeaders := []string{"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
+	hopByHopHeaders := map[string]struct{}{
+		"Connection":          struct{}{},
+		"Keep-Alive":          struct{}{},
+		"Proxy-Authenticate":  struct{}{},
+		"Proxy-Authorization": struct{}{},
+		"Te":                struct{}{},
+		"Trailers":          struct{}{},
+		"Transfer-Encoding": struct{}{},
+		"Upgrade":           struct{}{},
+	}
 
 	for _, extra := range strings.Split(respHeaders.Get("connection"), ",") {
 		// any header listed in connection, if present, is also considered hop-by-hop
 		if strings.Trim(extra, " ") != "" {
-			hopByHopHeaders = append(hopByHopHeaders, extra)
+			hopByHopHeaders[http.CanonicalHeaderKey(extra)] = struct{}{}
 		}
 	}
 	endToEndHeaders := []string{}
 	for respHeader, _ := range respHeaders {
-		if !containsHeader(hopByHopHeaders, respHeader) {
+		if _, ok := hopByHopHeaders[respHeader]; !ok {
 			endToEndHeaders = append(endToEndHeaders, respHeader)
 		}
 	}

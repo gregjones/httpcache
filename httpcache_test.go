@@ -489,6 +489,15 @@ func (s *S) TestMaxStaleValue(c *C) {
 	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
 }
 
+func containsHeader(headers []string, header string) bool {
+	for _, v := range headers {
+		if http.CanonicalHeaderKey(v) == http.CanonicalHeaderKey(header) {
+			return true
+		}
+	}
+	return false
+}
+
 type containsHeaderChecker struct {
 	*CheckerInfo
 }
