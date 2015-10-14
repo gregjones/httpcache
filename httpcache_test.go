@@ -1,7 +1,10 @@
 package httpcache
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -547,4 +550,39 @@ func (s *S) TestGetEndToEndHeaders(c *C) {
 	headers.Set("connection", "content-type")
 	end2end = getEndToEndHeaders(headers)
 	c.Check(end2end, HasLen, 0)
+}
+
+type transportMock struct {
+	response *http.Response
+	err      error
+}
+
+func (t transportMock) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	return t.response, t.err
+}
+
+func (s *S) TestCacheFallback(c *C) {
+	tmock := transportMock{
+		response: &http.Response{
+			Header: http.Header{"Cache-Control": []string{"no-cache"}},
+			Body:   ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
+		},
+		err: nil,
+	}
+	t := NewMemoryCacheTransport()
+	t.CacheFallback = true
+	t.Transport = &tmock
+
+	// First time, response is cached on success
+	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
+	resp, err := t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
+	// On failure, response is returned from the cache
+	tmock.response = nil
+	tmock.err = errors.New("some error")
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
 }

@@ -98,6 +98,8 @@ type Transport struct {
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
+	// If true, a cached response will be returned in case of network failure
+	CacheFallback bool
 }
 
 // NewTransport returns a new Transport with the
@@ -184,6 +186,12 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			cachedResp.StatusCode = http.StatusOK
 
 			resp = cachedResp
+		} else if t.CacheFallback && err != nil && req.Method == "GET" {
+			// In case of transport failure and cache fallback activated, returns cached content
+			// when available
+			cachedResp.Status = fmt.Sprintf("%d %s", http.StatusOK, http.StatusText(http.StatusOK))
+			cachedResp.StatusCode = http.StatusOK
+			return cachedResp, nil
 		} else {
 			if err != nil || resp.StatusCode != http.StatusOK {
 				t.Cache.Delete(cacheKey)
