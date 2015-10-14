@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -224,6 +225,20 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		t.Cache.Delete(cacheKey)
 	}
 	return resp, nil
+}
+
+// CancelRequest calls CancelRequest on the underlaying transport if implemented or
+// throw a warning otherwise.
+func (t *Transport) CancelRequest(req *http.Request) {
+	type canceler interface {
+		CancelRequest(*http.Request)
+	}
+	tr, ok := t.Transport.(canceler)
+	if !ok {
+		log.Printf("httpcache: Client Transport of type %T doesn't support CancelRequest; Timeout not supported", t.Transport)
+		return
+	}
+	tr.CancelRequest(req)
 }
 
 // ErrNoDateHeader indicates that the HTTP headers contained no Date header.
