@@ -254,6 +254,13 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			cachedResp.StatusCode = http.StatusOK
 
 			resp = cachedResp
+		} else if (err != nil || (cachedResp != nil && resp.StatusCode >= 500)) &&
+			req.Method == "GET" && canStaleOnError(cachedResp.Header, req.Header) {
+			// In case of transport failure and stale-if-error activated, returns cached content
+			// when available
+			cachedResp.Status = fmt.Sprintf("%d %s", http.StatusOK, http.StatusText(http.StatusOK))
+			cachedResp.StatusCode = http.StatusOK
+			return cachedResp, nil
 		} else {
 			if err != nil || resp.StatusCode != http.StatusOK {
 				t.Cache.Delete(cacheKey)
@@ -435,6 +442,50 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	}
 
 	return stale
+}
+
+// Returns true if either the request or the response includes the stale-if-error
+// cache control extension: https://tools.ietf.org/html/rfc5861
+func canStaleOnError(respHeaders, reqHeaders http.Header) bool {
+	respCacheControl := parseCacheControl(respHeaders)
+	reqCacheControl := parseCacheControl(reqHeaders)
+
+	var err error
+	lifetime := time.Duration(-1)
+
+	if staleMaxAge, ok := respCacheControl["stale-if-error"]; ok {
+		if staleMaxAge != "" {
+			lifetime, err = time.ParseDuration(staleMaxAge + "s")
+			if err != nil {
+				return false
+			}
+		} else {
+			return true
+		}
+	}
+	if staleMaxAge, ok := reqCacheControl["stale-if-error"]; ok {
+		if staleMaxAge != "" {
+			lifetime, err = time.ParseDuration(staleMaxAge + "s")
+			if err != nil {
+				return false
+			}
+		} else {
+			return true
+		}
+	}
+
+	if lifetime >= 0 {
+		date, err := Date(respHeaders)
+		if err != nil {
+			return false
+		}
+		currentAge := clock.since(date)
+		if lifetime > currentAge {
+			return true
+		}
+	}
+
+	return false
 }
 
 func getEndToEndHeaders(respHeaders http.Header) []string {

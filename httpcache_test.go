@@ -1,7 +1,10 @@
 package httpcache
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -547,4 +550,148 @@ func (s *S) TestGetEndToEndHeaders(c *C) {
 	headers.Set("connection", "content-type")
 	end2end = getEndToEndHeaders(headers)
 	c.Check(end2end, HasLen, 0)
+}
+
+type transportMock struct {
+	response *http.Response
+	err      error
+}
+
+func (t transportMock) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	return t.response, t.err
+}
+
+func (s *S) TestStaleIfErrorRequest(c *C) {
+	now := time.Now()
+	tmock := transportMock{
+		response: &http.Response{
+			Header: http.Header{
+				"Date":          []string{now.Format(time.RFC1123)},
+				"Cache-Control": []string{"no-cache"},
+			},
+			Body: ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
+		},
+		err: nil,
+	}
+	t := NewMemoryCacheTransport()
+	t.Transport = &tmock
+
+	// First time, response is cached on success
+	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
+	r.Header.Set("Cache-Control", "stale-if-error")
+	resp, err := t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
+	// On failure, response is returned from the cache
+	tmock.response = nil
+	tmock.err = errors.New("some error")
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+}
+
+func (s *S) TestStaleIfErrorRequestLifetime(c *C) {
+	now := time.Now()
+	tmock := transportMock{
+		response: &http.Response{
+			Header: http.Header{
+				"Date":          []string{now.Format(time.RFC1123)},
+				"Cache-Control": []string{"no-cache"},
+			},
+			Body: ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
+		},
+		err: nil,
+	}
+	t := NewMemoryCacheTransport()
+	t.Transport = &tmock
+
+	// First time, response is cached on success
+	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
+	r.Header.Set("Cache-Control", "stale-if-error=100")
+	resp, err := t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
+	// On failure, response is returned from the cache
+	tmock.response = nil
+	tmock.err = errors.New("some error")
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
+	// Same for http errors
+	tmock.response = &http.Response{StatusCode: http.StatusInternalServerError}
+	tmock.err = nil
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
+	// If failure last more than max stale, error is returned
+	clock = &fakeClock{elapsed: 200 * time.Second}
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, tmock.err)
+}
+
+func (s *S) TestStaleIfErrorResponse(c *C) {
+	now := time.Now()
+	tmock := transportMock{
+		response: &http.Response{
+			Header: http.Header{
+				"Date":          []string{now.Format(time.RFC1123)},
+				"Cache-Control": []string{"no-cache, stale-if-error"},
+			},
+			Body: ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
+		},
+		err: nil,
+	}
+	t := NewMemoryCacheTransport()
+	t.Transport = &tmock
+
+	// First time, response is cached on success
+	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
+	resp, err := t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
+	// On failure, response is returned from the cache
+	tmock.response = nil
+	tmock.err = errors.New("some error")
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+}
+
+func (s *S) TestStaleIfErrorResponseLifetime(c *C) {
+	now := time.Now()
+	tmock := transportMock{
+		response: &http.Response{
+			Header: http.Header{
+				"Date":          []string{now.Format(time.RFC1123)},
+				"Cache-Control": []string{"no-cache, stale-if-error=100"},
+			},
+			Body: ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
+		},
+		err: nil,
+	}
+	t := NewMemoryCacheTransport()
+	t.Transport = &tmock
+
+	// First time, response is cached on success
+	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
+	resp, err := t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
+	// On failure, response is returned from the cache
+	tmock.response = nil
+	tmock.err = errors.New("some error")
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
+	// If failure last more than max stale, error is returned
+	clock = &fakeClock{elapsed: 200 * time.Second}
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, tmock.err)
 }
