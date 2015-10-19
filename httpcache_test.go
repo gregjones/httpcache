@@ -561,7 +561,7 @@ func (t transportMock) RoundTrip(req *http.Request) (resp *http.Response, err er
 	return t.response, t.err
 }
 
-func (s *S) TestCacheFallback(c *C) {
+func (s *S) TestStaleIfErrorRequest(c *C) {
 	tmock := transportMock{
 		response: &http.Response{
 			Header: http.Header{"Cache-Control": []string{"no-cache"}},
@@ -570,7 +570,32 @@ func (s *S) TestCacheFallback(c *C) {
 		err: nil,
 	}
 	t := NewMemoryCacheTransport()
-	t.CacheFallback = true
+	t.Transport = &tmock
+
+	// First time, response is cached on success
+	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
+	r.Header.Set("Cache-Control", "stale-if-error")
+	resp, err := t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
+	// On failure, response is returned from the cache
+	tmock.response = nil
+	tmock.err = errors.New("some error")
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+}
+
+func (s *S) TestStaleIfErrorResponse(c *C) {
+	tmock := transportMock{
+		response: &http.Response{
+			Header: http.Header{"Cache-Control": []string{"no-cache, stale-if-error"}},
+			Body:   ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
+		},
+		err: nil,
+	}
+	t := NewMemoryCacheTransport()
 	t.Transport = &tmock
 
 	// First time, response is cached on success

@@ -98,8 +98,6 @@ type Transport struct {
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
-	// If true, a cached response will be returned in case of network failure
-	CacheFallback bool
 }
 
 // NewTransport returns a new Transport with the
@@ -186,7 +184,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			cachedResp.StatusCode = http.StatusOK
 
 			resp = cachedResp
-		} else if t.CacheFallback && err != nil && req.Method == "GET" {
+		} else if err != nil && req.Method == "GET" && canStaleOnError(req, cachedResp) {
 			// In case of transport failure and cache fallback activated, returns cached content
 			// when available
 			cachedResp.Status = fmt.Sprintf("%d %s", http.StatusOK, http.StatusText(http.StatusOK))
@@ -348,6 +346,19 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	}
 
 	return stale
+}
+
+// Returns true if either the request or the response includes the stale-if-error
+// cache control extension: https://tools.ietf.org/html/rfc5861
+func canStaleOnError(req *http.Request, resp *http.Response) bool {
+	const staleIfError = "stale-if-error"
+	if strings.Index(req.Header.Get("Cache-Control"), staleIfError) != -1 {
+		return true
+	}
+	if resp != nil && strings.Index(resp.Header.Get("Cache-Control"), staleIfError) != -1 {
+		return true
+	}
+	return false
 }
 
 func getEndToEndHeaders(respHeaders http.Header) []string {
