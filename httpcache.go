@@ -127,10 +127,10 @@ type Transport struct {
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
+	// guards modReq
+	mu sync.RWMutex
 	// Mapping of original request => cloned
 	modReq map[*http.Request]*http.Request
-	// guards clonedReqs
-	mu sync.RWMutex
 }
 
 // NewTransport returns a new Transport with the
