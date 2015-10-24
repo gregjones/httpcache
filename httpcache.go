@@ -184,7 +184,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			cachedResp.StatusCode = http.StatusOK
 
 			resp = cachedResp
-		} else if (err != nil || (cachedResp != nil && cachedResp.StatusCode >= 500)) &&
+		} else if (err != nil || (cachedResp != nil && resp.StatusCode >= 500)) &&
 			req.Method == "GET" && canStaleOnError(cachedResp.Header, req.Header) {
 			// In case of transport failure and stale-if-error activated, returns cached content
 			// when available

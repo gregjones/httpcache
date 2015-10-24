@@ -620,6 +620,13 @@ func (s *S) TestStaleIfErrorRequestLifetime(c *C) {
 	c.Assert(err, Equals, nil)
 	c.Assert(resp, NotNil)
 
+	// Same for http errors
+	tmock.response = &http.Response{StatusCode: http.StatusInternalServerError}
+	tmock.err = nil
+	resp, err = t.RoundTrip(r)
+	c.Assert(err, Equals, nil)
+	c.Assert(resp, NotNil)
+
 	// If failure last more than max stale, error is returned
 	clock = &fakeClock{elapsed: 200 * time.Second}
 	resp, err = t.RoundTrip(r)
