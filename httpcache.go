@@ -132,7 +132,7 @@ type Transport struct {
 	// Mapping of original request => cloned
 	modReq map[*http.Request]*http.Request
 	// [SWH|+]
-	ResponseErrorFunc func(resp *http.Response, req *http.Request) (*http.Response, error)
+	ResponseErrorFunc func(resp *http.Response, err error, req *http.Request) (*http.Response, error)
 }
 
 // NewTransport returns a new Transport with the
@@ -269,7 +269,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			}
 			if err != nil {
 				if t.ResponseErrorFunc != nil {
-					return t.ResponseErrorFunc(resp, req)
+					return t.ResponseErrorFunc(resp, err, req)
 				}
 				return nil, err
 			}
@@ -282,7 +282,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			resp, err = transport.RoundTrip(req)
 			if err != nil {
 				if t.ResponseErrorFunc != nil {
-					return t.ResponseErrorFunc(resp, req)
+					return t.ResponseErrorFunc(resp, err, req)
 				}
 				return nil, err
 			}
