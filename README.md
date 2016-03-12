@@ -1,6 +1,8 @@
 httpcache
 =========
 
+[![Build Status](https://travis-ci.org/gregjones/httpcache.svg?branch=master)](https://travis-ci.org/gregjones/httpcache)
+
 A Transport for Go's http.Client that will cache responses according to the HTTP RFC
 
 Package httpcache provides a http.RoundTripper implementation that works as a mostly RFC-compliant cache for http responses.
