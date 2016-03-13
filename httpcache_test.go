@@ -565,6 +565,8 @@ func (s *S) TestStaleIfErrorRequest(c *C) {
 	now := time.Now()
 	tmock := transportMock{
 		response: &http.Response{
+			Status:     http.StatusText(http.StatusOK),
+			StatusCode: http.StatusOK,
 			Header: http.Header{
 				"Date":          []string{now.Format(time.RFC1123)},
 				"Cache-Control": []string{"no-cache"},
@@ -595,6 +597,8 @@ func (s *S) TestStaleIfErrorRequestLifetime(c *C) {
 	now := time.Now()
 	tmock := transportMock{
 		response: &http.Response{
+			Status:     http.StatusText(http.StatusOK),
+			StatusCode: http.StatusOK,
 			Header: http.Header{
 				"Date":          []string{now.Format(time.RFC1123)},
 				"Cache-Control": []string{"no-cache"},
@@ -637,6 +641,8 @@ func (s *S) TestStaleIfErrorResponse(c *C) {
 	now := time.Now()
 	tmock := transportMock{
 		response: &http.Response{
+			Status:     http.StatusText(http.StatusOK),
+			StatusCode: http.StatusOK,
 			Header: http.Header{
 				"Date":          []string{now.Format(time.RFC1123)},
 				"Cache-Control": []string{"no-cache, stale-if-error"},
@@ -666,6 +672,8 @@ func (s *S) TestStaleIfErrorResponseLifetime(c *C) {
 	now := time.Now()
 	tmock := transportMock{
 		response: &http.Response{
+			Status:     http.StatusText(http.StatusOK),
+			StatusCode: http.StatusOK,
 			Header: http.Header{
 				"Date":          []string{now.Format(time.RFC1123)},
 				"Cache-Control": []string{"no-cache, stale-if-error=100"},
