@@ -7,7 +7,9 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,6 +106,20 @@ func (s *S) SetUpSuite(c *C) {
 		} else {
 			w.Write([]byte("Some text content"))
 		}
+	}))
+
+	// [/status/:code] - Respond with a particular status code
+	mux.HandleFunc("/status/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		statusStr := strings.Trim(strings.TrimPrefix(r.URL.Path, "/status/"), "/")
+		statusInt, err := strconv.Atoi(statusStr)
+		if err != nil {
+			panic(err)
+		} else if statusInt == 301 || statusInt == 302 {
+			w.Header().Set("Location", "http://example.com")
+		}
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.WriteHeader(statusInt)
+		w.Write([]byte("Some text content"))
 	}))
 }
 
@@ -702,4 +718,38 @@ func (s *S) TestStaleIfErrorResponseLifetime(c *C) {
 	clock = &fakeClock{elapsed: 200 * time.Second}
 	resp, err = t.RoundTrip(r)
 	c.Assert(err, Equals, tmock.err)
+}
+
+func (s *S) TestGetWithStatuseCodes(c *C) {
+	statusCaching := map[int]bool{
+		// Cacheable status codes
+		http.StatusOK:                   true,
+		http.StatusNonAuthoritativeInfo: true,
+		http.StatusMultipleChoices:      true,
+		http.StatusMovedPermanently:     true,
+		http.StatusFound:                true,
+		http.StatusNotFound:             true,
+		http.StatusGone:                 true,
+		// Some NOT-Cacheable status codes
+		http.StatusNotModified:         false,
+		http.StatusBadRequest:          false,
+		http.StatusUnauthorized:        false,
+		http.StatusInternalServerError: false,
+	}
+
+	for statusInt, isCacheable := range statusCaching {
+		path := "/status/" + strconv.Itoa(statusInt)
+		req, err := http.NewRequest("GET", s.server.URL+path, nil)
+		resp, err := s.transport.RoundTrip(req)
+		c.Assert(err, IsNil)
+		httputil.DumpResponse(resp, false)
+		c.Assert(resp.Header.Get(XFromCache), Equals, "")
+		c.Assert(resp.StatusCode, Equals, statusInt)
+
+		resp2, err2 := s.transport.RoundTrip(req)
+		c.Assert(err2, IsNil)
+		httputil.DumpResponse(resp2, false)
+		isCached := resp2.Header.Get(XFromCache) == "1"
+		c.Assert(isCached, Equals, isCacheable)
+	}
 }

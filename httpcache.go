@@ -28,6 +28,16 @@ const (
 	XFromCache = "X-From-Cache"
 )
 
+var cacheableResponseCodes = map[int]struct{}{
+	http.StatusOK:                   {}, // 200
+	http.StatusNonAuthoritativeInfo: {}, // 203
+	http.StatusMultipleChoices:      {}, // 300
+	http.StatusMovedPermanently:     {}, // 301
+	http.StatusFound:                {}, // 302
+	http.StatusNotFound:             {}, // 404
+	http.StatusGone:                 {}, // 410
+}
+
 // A Cache interface is used by the Transport to store and retrieve responses.
 type Cache interface {
 	// Get returns the []byte representation of a cached response and a bool
@@ -284,7 +294,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 	reqCacheControl := parseCacheControl(req.Header)
 	respCacheControl := parseCacheControl(resp.Header)
 
-	if canStore(reqCacheControl, respCacheControl) {
+	if canStore(resp.StatusCode, reqCacheControl, respCacheControl) {
 		for _, varyKey := range headerAllCommaSepValues(resp.Header, "vary") {
 			varyKey = http.CanonicalHeaderKey(varyKey)
 			fakeHeader := "X-Varied-" + varyKey
@@ -516,7 +526,10 @@ func getEndToEndHeaders(respHeaders http.Header) []string {
 	return endToEndHeaders
 }
 
-func canStore(reqCacheControl, respCacheControl cacheControl) (canStore bool) {
+func canStore(code int, reqCacheControl, respCacheControl cacheControl) (canStore bool) {
+	if _, ok := cacheableResponseCodes[code]; !ok {
+		return false
+	}
 	if _, ok := respCacheControl["no-store"]; ok {
 		return false
 	}
