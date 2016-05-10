@@ -21,3 +21,5 @@ Cache backends
 - https://github.com/gregjones/httpcache/memcache provides memcache implementations, for both App Engine and 'normal' memcache servers
 - https://github.com/sourcegraph/s3cache uses Amazon S3 for storage.
 - https://github.com/gregjones/httpcache/leveldbcache provides a filesystem-backed cache using [leveldb](https://github.com/syndtr/goleveldb/leveldb)
+- https://github.com/die-net/lrucache provides an in-memory cache that will evict least-recently used entries
+- https://github.com/die-net/lrucache/tree/master/twotier allows caches to be combined, for example to use lrucache above with a persistent disk-cache
