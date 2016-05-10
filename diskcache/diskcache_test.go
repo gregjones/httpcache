@@ -5,20 +5,12 @@ import (
 	"io/ioutil"
 	"os"
 	"testing"
-
-	. "gopkg.in/check.v1"
 )
 
-func Test(t *testing.T) { TestingT(t) }
-
-type S struct{}
-
-var _ = Suite(&S{})
-
-func (s *S) Test(c *C) {
+func TestDiskCache(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "httpcache")
 	if err != nil {
-		c.Fatalf("TempDir,: %v", err)
+		t.Fatalf("TempDir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
 
@@ -26,18 +18,25 @@ func (s *S) Test(c *C) {
 
 	key := "testKey"
 	_, ok := cache.Get(key)
-
-	c.Assert(ok, Equals, false)
+	if ok {
+		t.Fatal("retrieved key before adding it")
+	}
 
 	val := []byte("some bytes")
 	cache.Set(key, val)
 
 	retVal, ok := cache.Get(key)
-	c.Assert(ok, Equals, true)
-	c.Assert(bytes.Equal(retVal, val), Equals, true)
+	if !ok {
+		t.Fatal("could not retrieve an element we just added")
+	}
+	if !bytes.Equal(retVal, val) {
+		t.Fatal("retrieved a different value than what we put in")
+	}
 
 	cache.Delete(key)
 
 	_, ok = cache.Get(key)
-	c.Assert(ok, Equals, false)
+	if ok {
+		t.Fatal("deleted key still present")
+	}
 }
