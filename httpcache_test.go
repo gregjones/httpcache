@@ -56,6 +56,7 @@ func setup() {
 		etag := "124567"
 		if r.Header.Get("if-none-match") == etag {
 			w.WriteHeader(http.StatusNotModified)
+			return
 		}
 		w.Header().Set("etag", etag)
 	}))
@@ -64,6 +65,7 @@ func setup() {
 		lm := "Fri, 14 Dec 2010 01:01:50 GMT"
 		if r.Header.Get("if-modified-since") == lm {
 			w.WriteHeader(http.StatusNotModified)
+			return
 		}
 		w.Header().Set("last-modified", lm)
 	}))
@@ -102,9 +104,9 @@ func setup() {
 		updateFieldsCounter++
 		if r.Header.Get("if-none-match") != "" {
 			w.WriteHeader(http.StatusNotModified)
-		} else {
-			w.Write([]byte("Some text content"))
+			return
 		}
+		w.Write([]byte("Some text content"))
 	}))
 }
 
