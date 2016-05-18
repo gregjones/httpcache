@@ -281,10 +281,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 	}
 
-	reqCacheControl := parseCacheControl(req.Header)
-	respCacheControl := parseCacheControl(resp.Header)
-
-	if canStore(reqCacheControl, respCacheControl) {
+	if cacheableMethod && canStore(parseCacheControl(req.Header), parseCacheControl(resp.Header)) {
 		for _, varyKey := range headerAllCommaSepValues(resp.Header, "vary") {
 			varyKey = http.CanonicalHeaderKey(varyKey)
 			fakeHeader := "X-Varied-" + varyKey
