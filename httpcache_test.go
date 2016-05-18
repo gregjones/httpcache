@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"flag"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -46,6 +47,11 @@ func setup() {
 
 	mux.HandleFunc("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=3600")
+	}))
+
+	mux.HandleFunc("/method", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Write([]byte(r.Method))
 	}))
 
 	mux.HandleFunc("/nostore", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +123,65 @@ func teardown() {
 func resetTest() {
 	s.transport.Cache = NewMemoryCache()
 	clock = &realClock{}
+}
+
+// TestCacheableMethod ensures that uncacheable method does not get stored
+// in cache and get incorrectly used for a following cacheable method request.
+func TestCacheableMethod(t *testing.T) {
+	resetTest()
+	{
+		req, err := http.NewRequest("POST", s.server.URL+"/method", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), "POST"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/method", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), "GET"; got != want {
+			t.Errorf("got wrong body %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if resp.Header.Get(XFromCache) != "" {
+			t.Errorf("XFromCache header isn't blank")
+		}
+	}
 }
 
 func TestGetOnlyIfCachedHit(t *testing.T) {
