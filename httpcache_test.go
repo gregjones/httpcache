@@ -54,6 +54,21 @@ func setup() {
 		w.Write([]byte(r.Method))
 	}))
 
+	mux.HandleFunc("/range", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lm := "Fri, 14 Dec 2010 01:01:50 GMT"
+		if r.Header.Get("if-modified-since") == lm {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("last-modified", lm)
+		if r.Header.Get("range") == "bytes=4-9" {
+			w.WriteHeader(http.StatusPartialContent)
+			w.Write([]byte(" text "))
+			return
+		}
+		w.Write([]byte("Some text content"))
+	}))
+
 	mux.HandleFunc("/nostore", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 	}))
@@ -180,6 +195,118 @@ func TestCacheableMethod(t *testing.T) {
 		}
 		if resp.Header.Get(XFromCache) != "" {
 			t.Errorf("XFromCache header isn't blank")
+		}
+	}
+}
+
+func TestDontStorePartialRangeInCache(t *testing.T) {
+	resetTest()
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/range", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("range", "bytes=4-9")
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), " text "; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusPartialContent {
+			t.Errorf("response status code isn't 206 Partial Content: %v", resp.StatusCode)
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/range", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), "Some text content"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if resp.Header.Get(XFromCache) != "" {
+			t.Error("XFromCache header isn't blank")
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/range", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), "Some text content"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Errorf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/range", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("range", "bytes=4-9")
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), " text "; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusPartialContent {
+			t.Errorf("response status code isn't 206 Partial Content: %v", resp.StatusCode)
 		}
 	}
 }
