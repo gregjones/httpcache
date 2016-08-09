@@ -1,19 +1,17 @@
-package rediscache
+package redis
 
 import (
 	"bytes"
 	"testing"
 
-	"github.com/soveran/redisurl"
+	"github.com/garyburd/redigo/redis"
 )
 
-const testServer = "redis://localhost:6379"
-
 func TestRedisCache(t *testing.T) {
-	conn, err := redisurl.ConnectToURL(testServer)
+	conn, err := redis.Dial("tcp", "localhost:6379")
 	if err != nil {
 		// TODO: rather than skip the test, fall back to a faked redis server
-		t.Skipf("skipping test; no server running at %s", testServer)
+		t.Skipf("skipping test; no server running at localhost:6379")
 	}
 	conn.Do("FLUSHALL")
 
