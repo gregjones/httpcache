@@ -3,24 +3,20 @@ package httpcache
 import (
 	"bytes"
 	"errors"
-	"fmt"
+	"flag"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	. "gopkg.in/check.v1"
 )
 
-var _ = fmt.Print
-
-func Test(t *testing.T) { TestingT(t) }
-
-type S struct {
+var s struct {
 	server    *httptest.Server
 	client    http.Client
 	transport *Transport
@@ -34,12 +30,18 @@ func (c *fakeClock) since(t time.Time) time.Duration {
 	return c.elapsed
 }
 
-var _ = Suite(&S{})
+func TestMain(m *testing.M) {
+	flag.Parse()
+	setup()
+	code := m.Run()
+	teardown()
+	os.Exit(code)
+}
 
-func (s *S) SetUpSuite(c *C) {
-	t := NewMemoryCacheTransport()
-	client := http.Client{Transport: t}
-	s.transport = t
+func setup() {
+	tp := NewMemoryCacheTransport()
+	client := http.Client{Transport: tp}
+	s.transport = tp
 	s.client = client
 
 	mux := http.NewServeMux()
@@ -47,6 +49,26 @@ func (s *S) SetUpSuite(c *C) {
 
 	mux.HandleFunc("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=3600")
+	}))
+
+	mux.HandleFunc("/method", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Write([]byte(r.Method))
+	}))
+
+	mux.HandleFunc("/range", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lm := "Fri, 14 Dec 2010 01:01:50 GMT"
+		if r.Header.Get("if-modified-since") == lm {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("last-modified", lm)
+		if r.Header.Get("range") == "bytes=4-9" {
+			w.WriteHeader(http.StatusPartialContent)
+			w.Write([]byte(" text "))
+			return
+		}
+		w.Write([]byte("Some text content"))
 	}))
 
 	mux.HandleFunc("/nostore", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +79,7 @@ func (s *S) SetUpSuite(c *C) {
 		etag := "124567"
 		if r.Header.Get("if-none-match") == etag {
 			w.WriteHeader(http.StatusNotModified)
+			return
 		}
 		w.Header().Set("etag", etag)
 	}))
@@ -65,6 +88,7 @@ func (s *S) SetUpSuite(c *C) {
 		lm := "Fri, 14 Dec 2010 01:01:50 GMT"
 		if r.Header.Get("if-modified-since") == lm {
 			w.WriteHeader(http.StatusNotModified)
+			return
 		}
 		w.Header().Set("last-modified", lm)
 	}))
@@ -103,9 +127,9 @@ func (s *S) SetUpSuite(c *C) {
 		updateFieldsCounter++
 		if r.Header.Get("if-none-match") != "" {
 			w.WriteHeader(http.StatusNotModified)
-		} else {
-			w.Write([]byte("Some text content"))
+			return
 		}
+		w.Write([]byte("Some text content"))
 	}))
 
 	// [/status/:code] - Respond with a particular status code
@@ -123,153 +147,467 @@ func (s *S) SetUpSuite(c *C) {
 	}))
 }
 
-func (s *S) TearDownSuite(c *C) {
+func teardown() {
 	s.server.Close()
 }
 
-func (s *S) TearDownTest(c *C) {
+func resetTest() {
 	s.transport.Cache = NewMemoryCache()
 	clock = &realClock{}
 }
 
-func (s *S) TestGetOnlyIfCachedHit(c *C) {
-	req, err := http.NewRequest("GET", s.server.URL, nil)
-	c.Assert(err, IsNil)
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(resp.Header.Get(XFromCache), Equals, "")
-
-	req2, err2 := http.NewRequest("GET", s.server.URL, nil)
-	req2.Header.Add("cache-control", "only-if-cached")
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
-	c.Assert(resp2.StatusCode, Equals, 200)
+// TestCacheableMethod ensures that uncacheable method does not get stored
+// in cache and get incorrectly used for a following cacheable method request.
+func TestCacheableMethod(t *testing.T) {
+	resetTest()
+	{
+		req, err := http.NewRequest("POST", s.server.URL+"/method", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), "POST"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/method", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), "GET"; got != want {
+			t.Errorf("got wrong body %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if resp.Header.Get(XFromCache) != "" {
+			t.Errorf("XFromCache header isn't blank")
+		}
+	}
 }
 
-func (s *S) TestGetOnlyIfCachedMiss(c *C) {
+func TestDontStorePartialRangeInCache(t *testing.T) {
+	resetTest()
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/range", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("range", "bytes=4-9")
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), " text "; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusPartialContent {
+			t.Errorf("response status code isn't 206 Partial Content: %v", resp.StatusCode)
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/range", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), "Some text content"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if resp.Header.Get(XFromCache) != "" {
+			t.Error("XFromCache header isn't blank")
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/range", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), "Some text content"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Errorf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/range", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("range", "bytes=4-9")
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := buf.String(), " text "; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusPartialContent {
+			t.Errorf("response status code isn't 206 Partial Content: %v", resp.StatusCode)
+		}
+	}
+}
+
+func TestGetOnlyIfCachedHit(t *testing.T) {
+	resetTest()
+	{
+		req, err := http.NewRequest("GET", s.server.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Add("cache-control", "only-if-cached")
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+	}
+}
+
+func TestGetOnlyIfCachedMiss(t *testing.T) {
+	resetTest()
 	req, err := http.NewRequest("GET", s.server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Add("cache-control", "only-if-cached")
 	resp, err := s.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get(XFromCache), Equals, "")
-	c.Assert(resp.StatusCode, Equals, 504)
+	if resp.Header.Get(XFromCache) != "" {
+		t.Fatal("XFromCache header isn't blank")
+	}
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("response status code isn't 504 GatewayTimeout: %v", resp.StatusCode)
+	}
 }
 
-func (s *S) TestGetNoStoreRequest(c *C) {
+func TestGetNoStoreRequest(t *testing.T) {
+	resetTest()
 	req, err := http.NewRequest("GET", s.server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Add("Cache-Control", "no-store")
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get(XFromCache), Equals, "")
-
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "")
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
 }
 
-func (s *S) TestGetNoStoreResponse(c *C) {
+func TestGetNoStoreResponse(t *testing.T) {
+	resetTest()
 	req, err := http.NewRequest("GET", s.server.URL+"/nostore", nil)
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get(XFromCache), Equals, "")
-
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
 }
 
-func (s *S) TestGetWithEtag(c *C) {
+func TestGetWithEtag(t *testing.T) {
+	resetTest()
 	req, err := http.NewRequest("GET", s.server.URL+"/etag", nil)
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get(XFromCache), Equals, "")
-
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
-
-	// additional assertions to verify that 304 response is converted properly
-	c.Assert(resp2.Status, Equals, "200 OK")
-	_, ok := resp2.Header["Connection"]
-	c.Assert(ok, Equals, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+		// additional assertions to verify that 304 response is converted properly
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if _, ok := resp.Header["Connection"]; ok {
+			t.Fatalf("Connection header isn't absent")
+		}
+	}
 }
 
-func (s *S) TestGetWithLastModified(c *C) {
+func TestGetWithLastModified(t *testing.T) {
+	resetTest()
 	req, err := http.NewRequest("GET", s.server.URL+"/lastmodified", nil)
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get(XFromCache), Equals, "")
-
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+	}
 }
 
-func (s *S) TestGetWithVary(c *C) {
+func TestGetWithVary(t *testing.T) {
+	resetTest()
 	req, err := http.NewRequest("GET", s.server.URL+"/varyaccept", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("Accept", "text/plain")
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get("Vary"), Equals, "Accept")
-
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
-
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get("Vary") != "Accept" {
+			t.Fatalf(`Vary header isn't "Accept": %v`, resp.Header.Get("Vary"))
+		}
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+	}
 	req.Header.Set("Accept", "text/html")
-	resp3, err3 := s.client.Do(req)
-	defer resp3.Body.Close()
-	c.Assert(err3, IsNil)
-	c.Assert(resp3.Header.Get(XFromCache), Equals, "")
-
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
 	req.Header.Set("Accept", "")
-	resp4, err4 := s.client.Do(req)
-	defer resp4.Body.Close()
-	c.Assert(err4, IsNil)
-	c.Assert(resp4.Header.Get(XFromCache), Equals, "")
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
 }
 
-func (s *S) TestGetWithDoubleVary(c *C) {
+func TestGetWithDoubleVary(t *testing.T) {
+	resetTest()
 	req, err := http.NewRequest("GET", s.server.URL+"/doublevary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("Accept", "text/plain")
 	req.Header.Set("Accept-Language", "da, en-gb;q=0.8, en;q=0.7")
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get("Vary"), Not(Equals), "")
-
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
-
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get("Vary") == "" {
+			t.Fatalf(`Vary header is blank`)
+		}
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+	}
 	req.Header.Set("Accept-Language", "")
-	resp3, err3 := s.client.Do(req)
-	defer resp3.Body.Close()
-	c.Assert(err3, IsNil)
-	c.Assert(resp3.Header.Get(XFromCache), Equals, "")
-
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
 	req.Header.Set("Accept-Language", "da")
-	resp4, err4 := s.client.Do(req)
-	defer resp4.Body.Close()
-	c.Assert(err4, IsNil)
-	c.Assert(resp4.Header.Get(XFromCache), Equals, "")
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
 }
 
-func (s *S) TestGetWith2VaryHeaders(c *C) {
+func TestGetWith2VaryHeaders(t *testing.T) {
+	resetTest()
 	// Tests that multiple Vary headers' comma-separated lists are
 	// merged. See https://github.com/gregjones/httpcache/issues/27.
 	const (
@@ -277,173 +615,284 @@ func (s *S) TestGetWith2VaryHeaders(c *C) {
 		acceptLanguage = "da, en-gb;q=0.8, en;q=0.7"
 	)
 	req, err := http.NewRequest("GET", s.server.URL+"/2varyheaders", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("Accept", accept)
 	req.Header.Set("Accept-Language", acceptLanguage)
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get("Vary"), Not(Equals), "")
-
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
-
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get("Vary") == "" {
+			t.Fatalf(`Vary header is blank`)
+		}
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+	}
 	req.Header.Set("Accept-Language", "")
-	resp3, err3 := s.client.Do(req)
-	defer resp3.Body.Close()
-	c.Assert(err3, IsNil)
-	c.Assert(resp3.Header.Get(XFromCache), Equals, "")
-
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
 	req.Header.Set("Accept-Language", "da")
-	resp4, err4 := s.client.Do(req)
-	defer resp4.Body.Close()
-	c.Assert(err4, IsNil)
-	c.Assert(resp4.Header.Get(XFromCache), Equals, "")
-
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
 	req.Header.Set("Accept-Language", acceptLanguage)
 	req.Header.Set("Accept", "")
-	resp5, err5 := s.client.Do(req)
-	defer resp5.Body.Close()
-	c.Assert(err5, IsNil)
-	c.Assert(resp5.Header.Get(XFromCache), Equals, "")
-
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
 	req.Header.Set("Accept", "image/png")
-	resp6, err6 := s.client.Do(req)
-	defer resp6.Body.Close()
-	c.Assert(err6, IsNil)
-	c.Assert(resp6.Header.Get(XFromCache), Equals, "")
-
-	resp7, err7 := s.client.Do(req)
-	defer resp7.Body.Close()
-	c.Assert(err7, IsNil)
-	c.Assert(resp7.Header.Get(XFromCache), Equals, "1")
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+	}
 }
 
-func (s *S) TestGetVaryUnused(c *C) {
+func TestGetVaryUnused(t *testing.T) {
+	resetTest()
 	req, err := http.NewRequest("GET", s.server.URL+"/varyunused", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("Accept", "text/plain")
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get("Vary"), Not(Equals), "")
-
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get("Vary") == "" {
+			t.Fatalf(`Vary header is blank`)
+		}
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+	}
 }
 
-func (s *S) TestUpdateFields(c *C) {
+func TestUpdateFields(t *testing.T) {
+	resetTest()
 	req, err := http.NewRequest("GET", s.server.URL+"/updatefields", nil)
-	resp, err := s.client.Do(req)
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	counter := resp.Header.Get("x-counter")
-
-	resp2, err2 := s.client.Do(req)
-	defer resp2.Body.Close()
-	c.Assert(err2, IsNil)
-	c.Assert(resp2.Header.Get(XFromCache), Equals, "1")
-	counter2 := resp2.Header.Get("x-counter")
-
-	c.Assert(counter, Not(Equals), counter2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var counter, counter2 string
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		counter = resp.Header.Get("x-counter")
+	}
+	{
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+		counter2 = resp.Header.Get("x-counter")
+	}
+	if counter == counter2 {
+		t.Fatalf(`both "x-counter" values are equal: %v %v`, counter, counter2)
+	}
 }
 
-func (s *S) TestParseCacheControl(c *C) {
+func TestParseCacheControl(t *testing.T) {
+	resetTest()
 	h := http.Header{}
-	for _ = range parseCacheControl(h) {
-		c.Fatal("cacheControl should be empty")
+	for range parseCacheControl(h) {
+		t.Fatal("cacheControl should be empty")
 	}
 
 	h.Set("cache-control", "no-cache")
-	cc := parseCacheControl(h)
-	if _, ok := cc["foo"]; ok {
-		c.Error("Value shouldn't exist")
+	{
+		cc := parseCacheControl(h)
+		if _, ok := cc["foo"]; ok {
+			t.Error(`Value "foo" shouldn't exist`)
+		}
+		noCache, ok := cc["no-cache"]
+		if !ok {
+			t.Fatalf(`"no-cache" value isn't set`)
+		}
+		if noCache != "" {
+			t.Fatalf(`"no-cache" value isn't blank: %v`, noCache)
+		}
 	}
-	if nocache, ok := cc["no-cache"]; ok {
-		c.Assert(nocache, Equals, "")
-	}
-
 	h.Set("cache-control", "no-cache, max-age=3600")
-	cc = parseCacheControl(h)
-	c.Assert(cc["no-cache"], Equals, "")
-	c.Assert(cc["max-age"], Equals, "3600")
+	{
+		cc := parseCacheControl(h)
+		noCache, ok := cc["no-cache"]
+		if !ok {
+			t.Fatalf(`"no-cache" value isn't set`)
+		}
+		if noCache != "" {
+			t.Fatalf(`"no-cache" value isn't blank: %v`, noCache)
+		}
+		if cc["max-age"] != "3600" {
+			t.Fatalf(`"max-age" value isn't "3600": %v`, cc["max-age"])
+		}
+	}
 }
 
-func (s *S) TestNoCacheRequestExpiration(c *C) {
+func TestNoCacheRequestExpiration(t *testing.T) {
+	resetTest()
 	respHeaders := http.Header{}
 	respHeaders.Set("Cache-Control", "max-age=7200")
+
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Cache-Control", "no-cache")
-
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, transparent)
+	if getFreshness(respHeaders, reqHeaders) != transparent {
+		t.Fatal("freshness isn't transparent")
+	}
 }
 
-func (s *S) TestNoCacheResponseExpiration(c *C) {
+func TestNoCacheResponseExpiration(t *testing.T) {
+	resetTest()
 	respHeaders := http.Header{}
 	respHeaders.Set("Cache-Control", "no-cache")
 	respHeaders.Set("Expires", "Wed, 19 Apr 3000 11:43:00 GMT")
-	reqHeaders := http.Header{}
 
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+	reqHeaders := http.Header{}
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
 }
 
-func (s *S) TestReqMustRevalidate(c *C) {
+func TestReqMustRevalidate(t *testing.T) {
+	resetTest()
 	// not paying attention to request setting max-stale means never returning stale
 	// responses, so always acting as if must-revalidate is set
 	respHeaders := http.Header{}
+
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Cache-Control", "must-revalidate")
-
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
 }
 
-func (s *S) TestRespMustRevalidate(c *C) {
+func TestRespMustRevalidate(t *testing.T) {
+	resetTest()
 	respHeaders := http.Header{}
 	respHeaders.Set("Cache-Control", "must-revalidate")
-	reqHeaders := http.Header{}
 
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+	reqHeaders := http.Header{}
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
 }
 
-func (s *S) TestFreshExpiration(c *C) {
+func TestFreshExpiration(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	respHeaders := http.Header{}
 	respHeaders.Set("date", now.Format(time.RFC1123))
 	respHeaders.Set("expires", now.Add(time.Duration(2)*time.Second).Format(time.RFC1123))
 
 	reqHeaders := http.Header{}
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+	if getFreshness(respHeaders, reqHeaders) != fresh {
+		t.Fatal("freshness isn't fresh")
+	}
 
 	clock = &fakeClock{elapsed: 3 * time.Second}
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
 }
 
-func (s *S) TestMaxAge(c *C) {
+func TestMaxAge(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	respHeaders := http.Header{}
 	respHeaders.Set("date", now.Format(time.RFC1123))
 	respHeaders.Set("cache-control", "max-age=2")
 
 	reqHeaders := http.Header{}
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+	if getFreshness(respHeaders, reqHeaders) != fresh {
+		t.Fatal("freshness isn't fresh")
+	}
 
 	clock = &fakeClock{elapsed: 3 * time.Second}
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
 }
 
-func (s *S) TestMaxAgeZero(c *C) {
+func TestMaxAgeZero(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	respHeaders := http.Header{}
 	respHeaders.Set("date", now.Format(time.RFC1123))
 	respHeaders.Set("cache-control", "max-age=0")
 
 	reqHeaders := http.Header{}
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
 }
 
-func (s *S) TestBothMaxAge(c *C) {
+func TestBothMaxAge(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	respHeaders := http.Header{}
 	respHeaders.Set("date", now.Format(time.RFC1123))
@@ -451,10 +900,13 @@ func (s *S) TestBothMaxAge(c *C) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-age=0")
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
 }
 
-func (s *S) TestMinFreshWithExpires(c *C) {
+func TestMinFreshWithExpires(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	respHeaders := http.Header{}
 	respHeaders.Set("date", now.Format(time.RFC1123))
@@ -462,14 +914,19 @@ func (s *S) TestMinFreshWithExpires(c *C) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "min-fresh=1")
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+	if getFreshness(respHeaders, reqHeaders) != fresh {
+		t.Fatal("freshness isn't fresh")
+	}
 
 	reqHeaders = http.Header{}
 	reqHeaders.Set("cache-control", "min-fresh=2")
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
 }
 
-func (s *S) TestEmptyMaxStale(c *C) {
+func TestEmptyMaxStale(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	respHeaders := http.Header{}
 	respHeaders.Set("date", now.Format(time.RFC1123))
@@ -477,17 +934,19 @@ func (s *S) TestEmptyMaxStale(c *C) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-stale")
-
 	clock = &fakeClock{elapsed: 10 * time.Second}
-
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+	if getFreshness(respHeaders, reqHeaders) != fresh {
+		t.Fatal("freshness isn't fresh")
+	}
 
 	clock = &fakeClock{elapsed: 60 * time.Second}
-
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+	if getFreshness(respHeaders, reqHeaders) != fresh {
+		t.Fatal("freshness isn't fresh")
+	}
 }
 
-func (s *S) TestMaxStaleValue(c *C) {
+func TestMaxStaleValue(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	respHeaders := http.Header{}
 	respHeaders.Set("date", now.Format(time.RFC1123))
@@ -496,16 +955,19 @@ func (s *S) TestMaxStaleValue(c *C) {
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-stale=20")
 	clock = &fakeClock{elapsed: 5 * time.Second}
-
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+	if getFreshness(respHeaders, reqHeaders) != fresh {
+		t.Fatal("freshness isn't fresh")
+	}
 
 	clock = &fakeClock{elapsed: 15 * time.Second}
-
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, fresh)
+	if getFreshness(respHeaders, reqHeaders) != fresh {
+		t.Fatal("freshness isn't fresh")
+	}
 
 	clock = &fakeClock{elapsed: 30 * time.Second}
-
-	c.Assert(getFreshness(respHeaders, reqHeaders), Equals, stale)
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
 }
 
 func containsHeader(headers []string, header string) bool {
@@ -517,25 +979,8 @@ func containsHeader(headers []string, header string) bool {
 	return false
 }
 
-type containsHeaderChecker struct {
-	*CheckerInfo
-}
-
-func (c *containsHeaderChecker) Check(params []interface{}, names []string) (bool, string) {
-	items, ok := params[0].([]string)
-	if !ok {
-		return false, "Expected first param to be []string"
-	}
-	value, ok := params[1].(string)
-	if !ok {
-		return false, "Expected 2nd param to be string"
-	}
-	return containsHeader(items, value), ""
-}
-
-var ContainsHeader Checker = &containsHeaderChecker{&CheckerInfo{Name: "Contains", Params: []string{"Container", "expected to contain"}}}
-
-func (s *S) TestGetEndToEndHeaders(c *C) {
+func TestGetEndToEndHeaders(t *testing.T) {
+	resetTest()
 	var (
 		headers http.Header
 		end2end []string
@@ -546,26 +991,40 @@ func (s *S) TestGetEndToEndHeaders(c *C) {
 	headers.Set("te", "deflate")
 
 	end2end = getEndToEndHeaders(headers)
-	c.Check(end2end, ContainsHeader, "content-type")
-	c.Check(end2end, Not(ContainsHeader), "te")
+	if !containsHeader(end2end, "content-type") {
+		t.Fatal(`doesn't contain "content-type" header`)
+	}
+	if containsHeader(end2end, "te") {
+		t.Fatal(`doesn't contain "te" header`)
+	}
 
 	headers = http.Header{}
 	headers.Set("connection", "content-type")
 	headers.Set("content-type", "text/csv")
 	headers.Set("te", "deflate")
 	end2end = getEndToEndHeaders(headers)
-	c.Check(end2end, Not(ContainsHeader), "connection")
-	c.Check(end2end, Not(ContainsHeader), "content-type")
-	c.Check(end2end, Not(ContainsHeader), "te")
+	if containsHeader(end2end, "connection") {
+		t.Fatal(`doesn't contain "connection" header`)
+	}
+	if containsHeader(end2end, "content-type") {
+		t.Fatal(`doesn't contain "content-type" header`)
+	}
+	if containsHeader(end2end, "te") {
+		t.Fatal(`doesn't contain "te" header`)
+	}
 
 	headers = http.Header{}
 	end2end = getEndToEndHeaders(headers)
-	c.Check(end2end, HasLen, 0)
+	if len(end2end) != 0 {
+		t.Fatal(`non-zero end2end headers`)
+	}
 
 	headers = http.Header{}
 	headers.Set("connection", "content-type")
 	end2end = getEndToEndHeaders(headers)
-	c.Check(end2end, HasLen, 0)
+	if len(end2end) != 0 {
+		t.Fatal(`non-zero end2end headers`)
+	}
 }
 
 type transportMock struct {
@@ -577,7 +1036,8 @@ func (t transportMock) RoundTrip(req *http.Request) (resp *http.Response, err er
 	return t.response, t.err
 }
 
-func (s *S) TestStaleIfErrorRequest(c *C) {
+func TestStaleIfErrorRequest(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	tmock := transportMock{
 		response: &http.Response{
@@ -591,25 +1051,34 @@ func (s *S) TestStaleIfErrorRequest(c *C) {
 		},
 		err: nil,
 	}
-	t := NewMemoryCacheTransport()
-	t.Transport = &tmock
+	tp := NewMemoryCacheTransport()
+	tp.Transport = &tmock
 
 	// First time, response is cached on success
 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
 	r.Header.Set("Cache-Control", "stale-if-error")
-	resp, err := t.RoundTrip(r)
-	c.Assert(err, Equals, nil)
-	c.Assert(resp, NotNil)
+	resp, err := tp.RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 
 	// On failure, response is returned from the cache
 	tmock.response = nil
 	tmock.err = errors.New("some error")
-	resp, err = t.RoundTrip(r)
-	c.Assert(err, Equals, nil)
-	c.Assert(resp, NotNil)
+	resp, err = tp.RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 }
 
-func (s *S) TestStaleIfErrorRequestLifetime(c *C) {
+func TestStaleIfErrorRequestLifetime(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	tmock := transportMock{
 		response: &http.Response{
@@ -623,37 +1092,52 @@ func (s *S) TestStaleIfErrorRequestLifetime(c *C) {
 		},
 		err: nil,
 	}
-	t := NewMemoryCacheTransport()
-	t.Transport = &tmock
+	tp := NewMemoryCacheTransport()
+	tp.Transport = &tmock
 
 	// First time, response is cached on success
 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
 	r.Header.Set("Cache-Control", "stale-if-error=100")
-	resp, err := t.RoundTrip(r)
-	c.Assert(err, Equals, nil)
-	c.Assert(resp, NotNil)
+	resp, err := tp.RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 
 	// On failure, response is returned from the cache
 	tmock.response = nil
 	tmock.err = errors.New("some error")
-	resp, err = t.RoundTrip(r)
-	c.Assert(err, Equals, nil)
-	c.Assert(resp, NotNil)
+	resp, err = tp.RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 
 	// Same for http errors
 	tmock.response = &http.Response{StatusCode: http.StatusInternalServerError}
 	tmock.err = nil
-	resp, err = t.RoundTrip(r)
-	c.Assert(err, Equals, nil)
-	c.Assert(resp, NotNil)
+	resp, err = tp.RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 
 	// If failure last more than max stale, error is returned
 	clock = &fakeClock{elapsed: 200 * time.Second}
-	resp, err = t.RoundTrip(r)
-	c.Assert(err, Equals, tmock.err)
+	resp, err = tp.RoundTrip(r)
+	if err != tmock.err {
+		t.Fatalf("got err %v, want %v", err, tmock.err)
+	}
 }
 
-func (s *S) TestStaleIfErrorResponse(c *C) {
+func TestStaleIfErrorResponse(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	tmock := transportMock{
 		response: &http.Response{
@@ -667,24 +1151,33 @@ func (s *S) TestStaleIfErrorResponse(c *C) {
 		},
 		err: nil,
 	}
-	t := NewMemoryCacheTransport()
-	t.Transport = &tmock
+	tp := NewMemoryCacheTransport()
+	tp.Transport = &tmock
 
 	// First time, response is cached on success
 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
-	resp, err := t.RoundTrip(r)
-	c.Assert(err, Equals, nil)
-	c.Assert(resp, NotNil)
+	resp, err := tp.RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 
 	// On failure, response is returned from the cache
 	tmock.response = nil
 	tmock.err = errors.New("some error")
-	resp, err = t.RoundTrip(r)
-	c.Assert(err, Equals, nil)
-	c.Assert(resp, NotNil)
+	resp, err = tp.RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 }
 
-func (s *S) TestStaleIfErrorResponseLifetime(c *C) {
+func TestStaleIfErrorResponseLifetime(t *testing.T) {
+	resetTest()
 	now := time.Now()
 	tmock := transportMock{
 		response: &http.Response{
@@ -698,29 +1191,39 @@ func (s *S) TestStaleIfErrorResponseLifetime(c *C) {
 		},
 		err: nil,
 	}
-	t := NewMemoryCacheTransport()
-	t.Transport = &tmock
+	tp := NewMemoryCacheTransport()
+	tp.Transport = &tmock
 
 	// First time, response is cached on success
 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
-	resp, err := t.RoundTrip(r)
-	c.Assert(err, Equals, nil)
-	c.Assert(resp, NotNil)
+	resp, err := tp.RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 
 	// On failure, response is returned from the cache
 	tmock.response = nil
 	tmock.err = errors.New("some error")
-	resp, err = t.RoundTrip(r)
-	c.Assert(err, Equals, nil)
-	c.Assert(resp, NotNil)
+	resp, err = tp.RoundTrip(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 
 	// If failure last more than max stale, error is returned
 	clock = &fakeClock{elapsed: 200 * time.Second}
-	resp, err = t.RoundTrip(r)
-	c.Assert(err, Equals, tmock.err)
+	resp, err = tp.RoundTrip(r)
+	if err != tmock.err {
+		t.Fatalf("got err %v, want %v", err, tmock.err)
+	}
 }
 
-func (s *S) TestGetWithStatuseCodes(c *C) {
+func TestGetWithStatuseCodes(t *testing.T) {
 	statusCaching := map[int]bool{
 		// Cacheable status codes
 		http.StatusOK:                   true,
@@ -741,15 +1244,25 @@ func (s *S) TestGetWithStatuseCodes(c *C) {
 		path := "/status/" + strconv.Itoa(statusInt)
 		req, err := http.NewRequest("GET", s.server.URL+path, nil)
 		resp, err := s.transport.RoundTrip(req)
-		c.Assert(err, IsNil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		httputil.DumpResponse(resp, false)
-		c.Assert(resp.Header.Get(XFromCache), Equals, "")
-		c.Assert(resp.StatusCode, Equals, statusInt)
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("Initial request should not be cached")
+		}
+		if resp.StatusCode != statusInt {
+			t.Errorf("got %d, want %d", resp.StatusCode, statusInt)
+		}
 
 		resp2, err2 := s.transport.RoundTrip(req)
-		c.Assert(err2, IsNil)
+		if err2 != nil {
+			t.Fatal(err2)
+		}
 		httputil.DumpResponse(resp2, false)
 		isCached := resp2.Header.Get(XFromCache) == "1"
-		c.Assert(isCached, Equals, isCacheable)
+		if isCacheable != isCached {
+			t.Fatalf("Should be cached: %t got: %t", isCacheable, isCached)
+		}
 	}
 }

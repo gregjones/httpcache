@@ -1,20 +1,21 @@
-package diskcache
+package redis
 
 import (
 	"bytes"
-	"io/ioutil"
-	"os"
 	"testing"
+
+	"github.com/garyburd/redigo/redis"
 )
 
-func TestDiskCache(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "httpcache")
+func TestRedisCache(t *testing.T) {
+	conn, err := redis.Dial("tcp", "localhost:6379")
 	if err != nil {
-		t.Fatalf("TempDir: %v", err)
+		// TODO: rather than skip the test, fall back to a faked redis server
+		t.Skipf("skipping test; no server running at localhost:6379")
 	}
-	defer os.RemoveAll(tempDir)
+	conn.Do("FLUSHALL")
 
-	cache := New(tempDir)
+	cache := NewWithClient(conn)
 
 	key := "testKey"
 	_, ok := cache.Get(key)

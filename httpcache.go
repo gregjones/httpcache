@@ -190,9 +190,9 @@ func (t *Transport) setModReq(orig, mod *http.Request) {
 // will be returned.
 func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	cacheKey := cacheKey(req)
-	cacheableMethod := req.Method == "GET" || req.Method == "HEAD"
+	cacheable := (req.Method == "GET" || req.Method == "HEAD") && req.Header.Get("range") == ""
 	var cachedResp *http.Response
-	if cacheableMethod {
+	if cacheable {
 		cachedResp, err = CachedResponse(t.Cache, req)
 	} else {
 		// Need to invalidate an existing value
@@ -204,7 +204,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		transport = http.DefaultTransport
 	}
 
-	if cachedResp != nil && err == nil && cacheableMethod && req.Header.Get("range") == "" {
+	if cacheable && cachedResp != nil && err == nil {
 		if t.MarkCachedResponses {
 			cachedResp.Header.Set(XFromCache, "1")
 		}
@@ -291,10 +291,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 	}
 
-	reqCacheControl := parseCacheControl(req.Header)
-	respCacheControl := parseCacheControl(resp.Header)
-
-	if canStore(resp.StatusCode, reqCacheControl, respCacheControl) {
+	if cacheable && canStore(resp.StatusCode, parseCacheControl(req.Header), parseCacheControl(resp.Header)) {
 		for _, varyKey := range headerAllCommaSepValues(resp.Header, "vary") {
 			varyKey = http.CanonicalHeaderKey(varyKey)
 			fakeHeader := "X-Varied-" + varyKey
