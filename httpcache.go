@@ -26,6 +26,8 @@ const (
 	transparent
 	// XFromCache is the header added to responses that are returned from the cache
 	XFromCache = "X-From-Cache"
+	// Context key for cache namespace
+	ContextCacheKey = "Cache-Key"
 )
 
 var cacheableResponseCodes = map[int]struct{}{
@@ -51,6 +53,10 @@ type Cache interface {
 
 // cacheKey returns the cache key for req.
 func cacheKey(req *http.Request) string {
+	if key, ok := req.Context().Value(ContextCacheKey).(string); ok {
+		return key
+	}
+
 	return req.URL.String()
 }
 
