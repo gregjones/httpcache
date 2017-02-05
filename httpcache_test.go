@@ -465,6 +465,11 @@ func TestGetWithLastModified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if len(s.transport.modReq) != 0 {
+			t.Errorf("Request-map is not empty")
+		}
+	}()
 	{
 		resp, err := s.client.Do(req)
 		if err != nil {
