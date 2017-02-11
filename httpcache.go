@@ -223,22 +223,22 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 				}
 				if req2 != nil {
 					// Associate original request with cloned request so we can refer to
-					// it in CancelRequest()
+					// it in CancelRequest(). Release the mapping when it's no longer needed.
 					t.setModReq(req, req2)
-					req = req2
-					defer func() {
+					defer func(originalReq *http.Request) {
 						// Release req/clone mapping on error
 						if err != nil {
-							t.setModReq(req, nil)
+							t.setModReq(originalReq, nil)
 						}
 						if resp != nil {
 							// Release req/clone mapping on body close/EOF
 							resp.Body = &onEOFReader{
 								rc: resp.Body,
-								fn: func() { t.setModReq(req, nil) },
+								fn: func() { t.setModReq(originalReq, nil) },
 							}
 						}
-					}()
+					}(req)
+					req = req2
 				}
 			}
 		}
