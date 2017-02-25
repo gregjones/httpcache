@@ -1,15 +1,12 @@
 // Package redis provides a redis interface for http caching.
 package redis
 
-import (
-	"github.com/garyburd/redigo/redis"
-	"github.com/gregjones/httpcache"
-)
+import "github.com/garyburd/redigo/redis"
 
 // cache is an implementation of httpcache.Cache that caches responses in a
 // redis server.
-type cache struct {
-	redis.Conn
+type Cache struct {
+	*redis.Pool
 }
 
 // cacheKey modifies an httpcache key for use in redis. Specifically, it
@@ -19,8 +16,10 @@ func cacheKey(key string) string {
 }
 
 // Get returns the response corresponding to key if present.
-func (c cache) Get(key string) (resp []byte, ok bool) {
-	item, err := redis.Bytes(c.Do("GET", cacheKey(key)))
+func (c *Cache) Get(key string) (resp []byte, ok bool) {
+	conn := c.Pool.Get()
+	defer conn.Close()
+	item, err := redis.Bytes(conn.Do("GET", cacheKey(key)))
 	if err != nil {
 		return nil, false
 	}
@@ -28,16 +27,20 @@ func (c cache) Get(key string) (resp []byte, ok bool) {
 }
 
 // Set saves a response to the cache as key.
-func (c cache) Set(key string, resp []byte) {
-	c.Do("SET", cacheKey(key), resp)
+func (c *Cache) Set(key string, resp []byte) {
+	conn := c.Pool.Get()
+	conn.Do("SET", cacheKey(key), resp)
+	conn.Close()
 }
 
 // Delete removes the response with key from the cache.
-func (c cache) Delete(key string) {
-	c.Do("DEL", cacheKey(key))
+func (c *Cache) Delete(key string) {
+	conn := c.Pool.Get()
+	conn.Do("DEL", cacheKey(key))
+	conn.Close()
 }
 
-// NewWithClient returns a new Cache with the given redis connection.
-func NewWithClient(client redis.Conn) httpcache.Cache {
-	return cache{client}
+// NewWithClient returns a new Cache with the given redis pool.
+func NewWithClient(client *redis.Pool) *Cache {
+	return &Cache{client}
 }
