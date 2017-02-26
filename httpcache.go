@@ -34,7 +34,7 @@ type Cache interface {
 	// set to true if the value isn't empty
 	Get(key string) (responseBytes []byte, ok bool)
 	// Set stores the []byte representation of a response against a key
-	Set(key string, responseBytes []byte)
+	Set(key string, responseBytes []byte, duration time.Duration)
 	// Delete removes the value associated with the key
 	Delete(key string)
 }
@@ -71,7 +71,7 @@ func (c *MemoryCache) Get(key string) (resp []byte, ok bool) {
 }
 
 // Set saves response resp to the cache with key
-func (c *MemoryCache) Set(key string, resp []byte) {
+func (c *MemoryCache) Set(key string, resp []byte, duration time.Duration) {
 	c.mu.Lock()
 	c.items[key] = resp
 	c.mu.Unlock()
@@ -292,12 +292,46 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 		respBytes, err := httputil.DumpResponse(resp, true)
 		if err == nil {
-			t.Cache.Set(cacheKey, respBytes)
+			duration := cacheExpires(resp)
+			t.Cache.Set(cacheKey, respBytes, duration)
 		}
 	} else {
 		t.Cache.Delete(cacheKey)
 	}
 	return resp, nil
+}
+
+func cacheExpires(response *http.Response) time.Duration {
+	var (
+		lifetime     time.Duration
+		zeroDuration time.Duration
+		err          error
+	)
+	respCacheControl := parseCacheControl(response.Header)
+	// If a response includes both an Expires header and a max-age directive,
+	// the max-age directive overrides the Expires header, even if the Expires header is more restrictive.
+	if maxAge, ok := respCacheControl["max-age"]; ok {
+		lifetime, err = time.ParseDuration(maxAge + "s")
+		if err != nil {
+			lifetime = zeroDuration
+		}
+	} else {
+		expiresHeader := response.Header.Get("Expires")
+		if expiresHeader != "" {
+			expires, err := time.Parse(time.RFC1123, expiresHeader)
+			if err != nil {
+				lifetime = zeroDuration
+			} else {
+				date, err := Date(response.Header)
+				if err != nil {
+					lifetime = zeroDuration
+				} else {
+					lifetime = expires.Sub(date)
+				}
+			}
+		}
+	}
+	return lifetime
 }
 
 // CancelRequest calls CancelRequest on the underlaying transport if implemented or

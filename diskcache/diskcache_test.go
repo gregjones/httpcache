@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestDiskCache(t *testing.T) {
@@ -23,7 +24,7 @@ func TestDiskCache(t *testing.T) {
 	}
 
 	val := []byte("some bytes")
-	cache.Set(key, val)
+	cache.Set(key, val, time.Second)
 
 	retVal, ok := cache.Get(key)
 	if !ok {

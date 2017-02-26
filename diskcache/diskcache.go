@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
-	"github.com/peterbourgon/diskv"
 	"io"
+	"time"
+
+	"github.com/peterbourgon/diskv"
 )
 
 // Cache is an implementation of httpcache.Cache that supplements the in-memory map with persistent storage
@@ -27,7 +29,7 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 }
 
 // Set saves a response to the cache as key
-func (c *Cache) Set(key string, resp []byte) {
+func (c *Cache) Set(key string, resp []byte, duration time.Duration) {
 	key = keyToFilename(key)
 	c.d.WriteStream(key, bytes.NewReader(resp), true)
 }

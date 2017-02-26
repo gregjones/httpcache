@@ -1,7 +1,11 @@
 // Package redis provides a redis interface for http caching.
 package redis
 
-import "github.com/garyburd/redigo/redis"
+import (
+	"time"
+
+	"github.com/garyburd/redigo/redis"
+)
 
 // cache is an implementation of httpcache.Cache that caches responses in a
 // redis server.
@@ -27,9 +31,9 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 }
 
 // Set saves a response to the cache as key.
-func (c *Cache) Set(key string, resp []byte) {
+func (c *Cache) Set(key string, resp []byte, duration time.Duration) {
 	conn := c.Pool.Get()
-	conn.Do("SET", cacheKey(key), resp)
+	conn.Do("SETEX", cacheKey(key), (int)(duration.Seconds()), resp)
 	conn.Close()
 }
 

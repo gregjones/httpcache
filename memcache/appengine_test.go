@@ -5,6 +5,7 @@ package memcache
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"appengine/aetest"
 )
@@ -25,7 +26,7 @@ func TestAppEngine(t *testing.T) {
 	}
 
 	val := []byte("some bytes")
-	cache.Set(key, val)
+	cache.Set(key, val, time.Second)
 
 	retVal, ok := cache.Get(key)
 	if !ok {

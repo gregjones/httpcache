@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"net"
 	"testing"
+	"time"
 )
 
 const testServer = "localhost:11211"
@@ -28,7 +29,7 @@ func TestMemCache(t *testing.T) {
 	}
 
 	val := []byte("some bytes")
-	cache.Set(key, val)
+	cache.Set(key, val, time.Second)
 
 	retVal, ok := cache.Get(key)
 	if !ok {
