@@ -5,6 +5,9 @@ go:
   - 1.7.5
   - 1.8
   - tip
+services:
+  - memcached
+  - redis
 matrix:
   allow_failures:
     - go: tip
