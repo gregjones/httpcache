@@ -33,7 +33,8 @@ type Cache interface {
 	// Get returns the []byte representation of a cached response and a bool
 	// set to true if the value isn't empty
 	Get(key string) (responseBytes []byte, ok bool)
-	// Set stores the []byte representation of a response against a key
+	// Set stores the []byte representation of a response against a key with the
+	// remaining cache duration.
 	Set(key string, responseBytes []byte, duration time.Duration)
 	// Delete removes the value associated with the key
 	Delete(key string)
@@ -70,7 +71,7 @@ func (c *MemoryCache) Get(key string) (resp []byte, ok bool) {
 	return resp, ok
 }
 
-// Set saves response resp to the cache with key
+// Set saves response resp to the cache with key. Duration is not implemented.
 func (c *MemoryCache) Set(key string, resp []byte, duration time.Duration) {
 	c.mu.Lock()
 	c.items[key] = resp

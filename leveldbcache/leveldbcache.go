@@ -23,7 +23,7 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 	return resp, true
 }
 
-// Set saves a response to the cache as key
+// Set saves a response to the cache as key. Duration is not implemented.
 func (c *Cache) Set(key string, resp []byte, duration time.Duration) {
 	c.db.Put([]byte(key), resp, nil)
 }

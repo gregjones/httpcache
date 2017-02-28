@@ -35,7 +35,7 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 	return item.Value, true
 }
 
-// Set saves a response to the cache as key.
+// Set saves a response to the cache as key and set to expire after the duration.
 func (c *Cache) Set(key string, resp []byte, duration time.Duration) {
 	item := &memcache.Item{
 		Key:        cacheKey(key),

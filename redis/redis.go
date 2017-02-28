@@ -7,7 +7,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
-// cache is an implementation of httpcache.Cache that caches responses in a
+// Cache is an implementation of httpcache.Cache that caches responses in a
 // redis server.
 type Cache struct {
 	*redis.Pool
@@ -30,7 +30,7 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 	return item, true
 }
 
-// Set saves a response to the cache as key.
+// Set saves a response to the cache as key and set to expire after the duration.
 func (c *Cache) Set(key string, resp []byte, duration time.Duration) {
 	conn := c.Pool.Get()
 	conn.Do("SETEX", cacheKey(key), (int)(duration.Seconds()), resp)

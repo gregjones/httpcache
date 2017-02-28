@@ -152,5 +152,4 @@ func TestConcurrency(t *testing.T) {
 	for i := 0; i < len(data); i++ {
 		<-retChan
 	}
-
 }
