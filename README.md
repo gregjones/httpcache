@@ -21,4 +21,4 @@ Cache Backends
 License
 -------
 
--	[MIT License](LICENSE)
+-	[MIT License](LICENSE.txt)
