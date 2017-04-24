@@ -1119,7 +1119,7 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 
 	// If failure last more than max stale, error is returned
 	clock = &fakeClock{elapsed: 200 * time.Second}
-	resp, err = tp.RoundTrip(r)
+	_, err = tp.RoundTrip(r)
 	if err != tmock.err {
 		t.Fatalf("got err %v, want %v", err, tmock.err)
 	}
@@ -1206,7 +1206,7 @@ func TestStaleIfErrorResponseLifetime(t *testing.T) {
 
 	// If failure last more than max stale, error is returned
 	clock = &fakeClock{elapsed: 200 * time.Second}
-	resp, err = tp.RoundTrip(r)
+	_, err = tp.RoundTrip(r)
 	if err != tmock.err {
 		t.Fatalf("got err %v, want %v", err, tmock.err)
 	}
