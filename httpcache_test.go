@@ -129,6 +129,11 @@ func setup() {
 		}
 		w.Write([]byte("Some text content"))
 	}))
+
+	// Take 3 seconds to return 200 OK (for testing client timeouts).
+	mux.HandleFunc("/3seconds", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(3 * time.Second)
+	}))
 }
 
 func teardown() {
@@ -465,11 +470,6 @@ func TestGetWithLastModified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if len(s.transport.modReq) != 0 {
-			t.Errorf("Request-map is not empty")
-		}
-	}()
 	{
 		resp, err := s.client.Do(req)
 		if err != nil {
@@ -1119,7 +1119,7 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 
 	// If failure last more than max stale, error is returned
 	clock = &fakeClock{elapsed: 200 * time.Second}
-	resp, err = tp.RoundTrip(r)
+	_, err = tp.RoundTrip(r)
 	if err != tmock.err {
 		t.Fatalf("got err %v, want %v", err, tmock.err)
 	}
@@ -1206,8 +1206,36 @@ func TestStaleIfErrorResponseLifetime(t *testing.T) {
 
 	// If failure last more than max stale, error is returned
 	clock = &fakeClock{elapsed: 200 * time.Second}
-	resp, err = tp.RoundTrip(r)
+	_, err = tp.RoundTrip(r)
 	if err != tmock.err {
 		t.Fatalf("got err %v, want %v", err, tmock.err)
+	}
+}
+
+// Test that http.Client.Timeout is respected when cache transport is used.
+// That is so as long as request cancellation is propagated correctly.
+// In the past, that required CancelRequest to be implemented correctly,
+// but modern http.Client uses Request.Cancel (or request context) instead,
+// so we don't have to do anything.
+func TestClientTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timeout test in short mode") // Because it takes at least 3 seconds to run.
+	}
+	resetTest()
+	client := &http.Client{
+		Transport: NewMemoryCacheTransport(),
+		Timeout:   time.Second,
+	}
+	started := time.Now()
+	resp, err := client.Get(s.server.URL + "/3seconds")
+	taken := time.Since(started)
+	if err == nil {
+		t.Error("got nil error, want timeout error")
+	}
+	if resp != nil {
+		t.Error("got non-nil resp, want nil resp")
+	}
+	if taken >= 2*time.Second {
+		t.Error("client.Do took 2+ seconds, want < 2 seconds")
 	}
 }

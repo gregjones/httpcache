@@ -11,8 +11,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -90,33 +88,6 @@ func NewMemoryCache() *MemoryCache {
 	return c
 }
 
-// onEOFReader executes a function on reader EOF or close
-type onEOFReader struct {
-	rc io.ReadCloser
-	fn func()
-}
-
-func (r *onEOFReader) Read(p []byte) (n int, err error) {
-	n, err = r.rc.Read(p)
-	if err == io.EOF {
-		r.runFunc()
-	}
-	return
-}
-
-func (r *onEOFReader) Close() error {
-	err := r.rc.Close()
-	r.runFunc()
-	return err
-}
-
-func (r *onEOFReader) runFunc() {
-	if fn := r.fn; fn != nil {
-		fn()
-		r.fn = nil
-	}
-}
-
 // Transport is an implementation of http.RoundTripper that will return values from a cache
 // where possible (avoiding a network request) and will additionally add validators (etag/if-modified-since)
 // to repeated requests allowing servers to return 304 / Not Modified
@@ -127,10 +98,6 @@ type Transport struct {
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
-	// guards modReq
-	mu sync.RWMutex
-	// Mapping of original request => cloned
-	modReq map[*http.Request]*http.Request
 }
 
 // NewTransport returns a new Transport with the
@@ -154,20 +121,6 @@ func varyMatches(cachedResp *http.Response, req *http.Request) bool {
 		}
 	}
 	return true
-}
-
-// setModReq maintains a mapping between original requests and their associated cloned requests
-func (t *Transport) setModReq(orig, mod *http.Request) {
-	t.mu.Lock()
-	if t.modReq == nil {
-		t.modReq = make(map[*http.Request]*http.Request)
-	}
-	if mod == nil {
-		delete(t.modReq, orig)
-	} else {
-		t.modReq[orig] = mod
-	}
-	t.mu.Unlock()
 }
 
 // RoundTrip takes a Request and returns a Response
@@ -222,22 +175,6 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 					req2.Header.Set("if-modified-since", lastModified)
 				}
 				if req2 != nil {
-					// Associate original request with cloned request so we can refer to
-					// it in CancelRequest(). Release the mapping when it's no longer needed.
-					t.setModReq(req, req2)
-					defer func(originalReq *http.Request) {
-						// Release req/clone mapping on error
-						if err != nil {
-							t.setModReq(originalReq, nil)
-						}
-						if resp != nil {
-							// Release req/clone mapping on body close/EOF
-							resp.Body = &onEOFReader{
-								rc: resp.Body,
-								fn: func() { t.setModReq(originalReq, nil) },
-							}
-						}
-					}(req)
 					req = req2
 				}
 			}
@@ -298,31 +235,6 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		t.Cache.Delete(cacheKey)
 	}
 	return resp, nil
-}
-
-// CancelRequest calls CancelRequest on the underlaying transport if implemented or
-// throw a warning otherwise.
-func (t *Transport) CancelRequest(req *http.Request) {
-	type canceler interface {
-		CancelRequest(*http.Request)
-	}
-	tr, ok := t.Transport.(canceler)
-	if !ok {
-		log.Printf("httpcache: Client Transport of type %T doesn't support CancelRequest; Timeout not supported", t.Transport)
-		return
-	}
-
-	t.mu.RLock()
-	if modReq, ok := t.modReq[req]; ok {
-		t.mu.RUnlock()
-		t.mu.Lock()
-		delete(t.modReq, req)
-		t.mu.Unlock()
-		tr.CancelRequest(modReq)
-	} else {
-		t.mu.RUnlock()
-		tr.CancelRequest(req)
-	}
 }
 
 // ErrNoDateHeader indicates that the HTTP headers contained no Date header.
