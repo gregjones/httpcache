@@ -18,6 +18,7 @@ var s struct {
 	server    *httptest.Server
 	client    http.Client
 	transport *Transport
+	done      chan struct{} // Closed to unlock infinite handlers.
 }
 
 type fakeClock struct {
@@ -41,6 +42,7 @@ func setup() {
 	client := http.Client{Transport: tp}
 	s.transport = tp
 	s.client = client
+	s.done = make(chan struct{})
 
 	mux := http.NewServeMux()
 	s.server = httptest.NewServer(mux)
@@ -134,9 +136,21 @@ func setup() {
 	mux.HandleFunc("/3seconds", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
 	}))
+
+	mux.HandleFunc("/infinite", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for {
+			select {
+			case <-s.done:
+				return
+			default:
+				w.Write([]byte{0})
+			}
+		}
+	}))
 }
 
 func teardown() {
+	close(s.done)
 	s.server.Close()
 }
 
@@ -316,6 +330,58 @@ func TestDontStorePartialRangeInCache(t *testing.T) {
 	}
 }
 
+func TestCacheOnlyIfBodyRead(t *testing.T) {
+	resetTest()
+	{
+		req, err := http.NewRequest("GET", s.server.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("XFromCache header isn't blank")
+		}
+		// We do not read the body
+		resp.Body.Close()
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatalf("XFromCache header isn't blank")
+		}
+	}
+}
+
+func TestOnlyReadBodyOnDemand(t *testing.T) {
+	resetTest()
+
+	req, err := http.NewRequest("GET", s.server.URL+"/infinite", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := s.client.Do(req) // This shouldn't hang forever.
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 10) // Only partially read the body.
+	_, err = resp.Body.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+}
+
 func TestGetOnlyIfCachedHit(t *testing.T) {
 	resetTest()
 	{
@@ -330,6 +396,10 @@ func TestGetOnlyIfCachedHit(t *testing.T) {
 		defer resp.Body.Close()
 		if resp.Header.Get(XFromCache) != "" {
 			t.Fatal("XFromCache header isn't blank")
+		}
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 	{
@@ -444,6 +514,11 @@ func TestGetWithEtag(t *testing.T) {
 		if resp.Header.Get(XFromCache) != "" {
 			t.Fatal("XFromCache header isn't blank")
 		}
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
 	}
 	{
 		resp, err := s.client.Do(req)
@@ -479,6 +554,10 @@ func TestGetWithLastModified(t *testing.T) {
 		if resp.Header.Get(XFromCache) != "" {
 			t.Fatal("XFromCache header isn't blank")
 		}
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	{
 		resp, err := s.client.Do(req)
@@ -507,6 +586,10 @@ func TestGetWithVary(t *testing.T) {
 		defer resp.Body.Close()
 		if resp.Header.Get("Vary") != "Accept" {
 			t.Fatalf(`Vary header isn't "Accept": %v`, resp.Header.Get("Vary"))
+		}
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 	{
@@ -559,6 +642,10 @@ func TestGetWithDoubleVary(t *testing.T) {
 		defer resp.Body.Close()
 		if resp.Header.Get("Vary") == "" {
 			t.Fatalf(`Vary header is blank`)
+		}
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 	{
@@ -618,6 +705,10 @@ func TestGetWith2VaryHeaders(t *testing.T) {
 		if resp.Header.Get("Vary") == "" {
 			t.Fatalf(`Vary header is blank`)
 		}
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	{
 		resp, err := s.client.Do(req)
@@ -673,6 +764,10 @@ func TestGetWith2VaryHeaders(t *testing.T) {
 		if resp.Header.Get(XFromCache) != "" {
 			t.Fatal("XFromCache header isn't blank")
 		}
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	{
 		resp, err := s.client.Do(req)
@@ -702,6 +797,10 @@ func TestGetVaryUnused(t *testing.T) {
 		if resp.Header.Get("Vary") == "" {
 			t.Fatalf(`Vary header is blank`)
 		}
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	{
 		resp, err := s.client.Do(req)
@@ -729,6 +828,10 @@ func TestUpdateFields(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		counter = resp.Header.Get("x-counter")
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	{
 		resp, err := s.client.Do(req)
@@ -1053,6 +1156,10 @@ func TestStaleIfErrorRequest(t *testing.T) {
 	if resp == nil {
 		t.Fatal("resp is nil")
 	}
+	_, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// On failure, response is returned from the cache
 	tmock.response = nil
@@ -1093,6 +1200,10 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("resp is nil")
+	}
+	_, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// On failure, response is returned from the cache
@@ -1152,6 +1263,10 @@ func TestStaleIfErrorResponse(t *testing.T) {
 	if resp == nil {
 		t.Fatal("resp is nil")
 	}
+	_, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// On failure, response is returned from the cache
 	tmock.response = nil
@@ -1191,6 +1306,10 @@ func TestStaleIfErrorResponseLifetime(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("resp is nil")
+	}
+	_, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// On failure, response is returned from the cache
