@@ -18,6 +18,44 @@ Cache Backends
 - [`github.com/die-net/lrucache`](https://github.com/die-net/lrucache) provides an in-memory cache that will evict least-recently used entries.
 - [`github.com/die-net/lrucache/twotier`](https://github.com/die-net/lrucache/tree/master/twotier) allows caches to be combined, for example to use lrucache above with a persistent disk-cache.
 
+## Getting started
+
+Below is a basic example of usage.
+```
+func httpCacheExample() {
+    numOfRequests := 0
+    ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=10"))
+        if numOfRequests == 0 {
+            w.Write([]byte("Hello!"))
+        } else {
+            w.Write([]byte("Goodbye!"))
+        }
+        numOfRequests++
+    }))
+
+    httpClient := &http.Client{
+        Transport: httpcache.NewMemoryCacheTransport(),
+    }
+    makeRequest(ts, httpClient) // "Hello!"
+
+    // The second request is under max-age, so the cache is used rather than hitting the server
+    makeRequest(ts, httpClient) // "Hello!"
+
+    // Sleep so the max-age is passed
+    time.Sleep(time.Second * 11)
+
+    makeRequest(ts, httpClient) // "Goodbye!"
+}
+
+func makeRequest(ts *httptest.Server, httpClient *http.Client) {
+    resp, _ := httpClient.Get(ts.URL)
+    var buf bytes.Buffer
+    io.Copy(&buf, resp.Body)
+    println(buf.String())
+}
+```
+
 License
 -------
 
