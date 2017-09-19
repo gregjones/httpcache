@@ -225,16 +225,19 @@ func TestDontServeHeadResponseToGetRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.client.Do(req)
+	_, err = s.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req, err = http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.client.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Header.Get(XFromCache) != "" {
+	if resp.Header.Get(XFromCache) != "" {
 		t.Errorf("Cache should not match")
 	}
 }
