@@ -453,7 +453,7 @@ func canStore(reqCacheControl, respCacheControl cacheControl) (canStore bool) {
 
 func newGatewayTimeoutResponse(req *http.Request) *http.Response {
 	braw := strings.NewReader("HTTP/1.1 504 Gateway Timeout\r\n\r\n")
-	resp, err := http.ReadResponse(bufio.NewReader(braw), req)
+	resp, err := http.ReadResponse(bufio.NewReaderSize(braw, 0), req)
 	if err != nil {
 		panic(err)
 	}
