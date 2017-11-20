@@ -56,7 +56,20 @@ func CachedResponse(c Cache, req *http.Request) (resp *http.Response, err error)
 	}
 
 	b := bytes.NewReader(cachedVal)
-	return http.ReadResponse(bufio.NewReader(b), req)
+
+	// bufio.NewReader defaults to buffering 4096 bytes. As the size of the
+	// reader is known ahead of time, we limit the buffer size so as to reduce
+	// wasted memory.
+	//
+	// This still introduces pointless buffering, but it isn't clear that
+	// a lesser buffer size will function correctly in all cases.
+	n := b.Len()
+	const defaultBufSize = 4096
+	if n > defaultBufSize {
+		n = defaultBufSize
+	}
+
+	return http.ReadResponse(bufio.NewReaderSize(b, n), req)
 }
 
 // MemoryCache is an implemtation of Cache that stores responses in an in-memory map.
