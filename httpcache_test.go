@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -19,6 +21,17 @@ var s struct {
 	client    http.Client
 	transport *Transport
 	done      chan struct{} // Closed to unlock infinite handlers.
+	requests  uint32
+}
+
+func numRequests() uint32 {
+	return atomic.LoadUint32(&s.requests)
+}
+func resetRequests() {
+	atomic.StoreUint32(&s.requests, 0)
+}
+func incRequests() uint32 {
+	return atomic.AddUint32(&s.requests, 1)
 }
 
 type fakeClock struct {
@@ -158,6 +171,14 @@ func setup() {
 			}
 		}
 	}))
+	mux.HandleFunc("/singleflight", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		incRequests()
+		// delay to respond so multiple requests are issued
+		time.Sleep(100 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Write([]byte(`OK`))
+	}))
 }
 
 func teardown() {
@@ -166,6 +187,7 @@ func teardown() {
 }
 
 func resetTest() {
+	resetRequests()
 	s.transport.Cache = NewMemoryCache()
 	clock = &realClock{}
 }
@@ -1471,5 +1493,43 @@ func TestClientTimeout(t *testing.T) {
 	}
 	if taken >= 2*time.Second {
 		t.Error("client.Do took 2+ seconds, want < 2 seconds")
+	}
+}
+
+// Test that multiple requests are not issued for the same key at the same time.
+func TestSingleFlight(t *testing.T) {
+	// if testing.Short() {
+	// 	t.Skip("skipping timeout test in short mode") // Because it takes at least 1 seconds to run.
+	// }
+	resetTest()
+	client := &http.Client{
+		Transport: NewBlockingTransport(nil),
+	}
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 5; i++ {
+		time.Sleep(10 * time.Millisecond)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := client.Get(s.server.URL + "/singleflight")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("Invalid response code %d", resp.StatusCode)
+			}
+			defer resp.Body.Close()
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != "OK" {
+				t.Fatalf("Invalid body %s", body)
+			}
+		}()
+	}
+	wg.Wait()
+	if n := numRequests(); n != 1 {
+		t.Fatalf("Multiple requests %d", n)
 	}
 }
