@@ -32,6 +32,9 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 
 // Set saves a response to the cache as key and set to expire after the duration.
 func (c *Cache) Set(key string, resp []byte, duration time.Duration) {
+	if duration > time.Hour {
+		duration = time.Hour
+	}
 	conn := c.Pool.Get()
 	conn.Do("SETEX", cacheKey(key), (int)(duration.Seconds()), resp)
 	conn.Close()
