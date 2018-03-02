@@ -9,6 +9,9 @@
 package memcache
 
 import (
+	"crypto/md5"
+	"fmt"
+
 	"github.com/bradfitz/gomemcache/memcache"
 )
 
@@ -19,9 +22,13 @@ type Cache struct {
 }
 
 // cacheKey modifies an httpcache key for use in memcache.  Specifically, it
-// prefixes keys to avoid collision with other data stored in memcache.
+// prefixes keys to avoid collision with other data stored in memcache. It
+// also uses the MD5 hash of the key in order to avoid exceeding the 250
+// character length limit for a memcache key.
 func cacheKey(key string) string {
-	return "httpcache:" + key
+	md5 := md5.Sum([]byte(key))
+
+	return "httpcache:" + fmt.Sprintf("%x", md5)
 }
 
 // Get returns the response corresponding to key if present.
