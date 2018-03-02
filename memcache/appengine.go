@@ -29,7 +29,7 @@ type Cache struct {
 func cacheKey(key string) string {
 	md5 := md5.Sum([]byte(key))
 
-	return "httpcache:" + fmt.Sprintf("%x", md5)
+	return fmt.Sprintf("httpcache:%x", md5)
 }
 
 // Get returns the response corresponding to key if present.
