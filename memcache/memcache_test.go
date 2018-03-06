@@ -44,4 +44,33 @@ func TestMemCache(t *testing.T) {
 	if ok {
 		t.Fatal("deleted key still present")
 	}
+
+	// memcached has a limit of 250 characters for a key
+	chars := make([]byte, 260)
+	for i := range chars {
+		chars[i] = "x"[0]
+	}
+	longKey := string(chars)
+
+	_, ok = cache.Get(longKey)
+	if ok {
+		t.Fatal("retrieved long key before adding it")
+	}
+
+	cache.Set(longKey, val)
+
+	retVal, ok = cache.Get(longKey)
+	if !ok {
+		t.Fatal("could not retrieve an element with a long key")
+	}
+	if !bytes.Equal(retVal, val) {
+		t.Fatal("retrieved a different value than what we put in for an element with a long key")
+	}
+
+	cache.Delete(longKey)
+
+	_, ok = cache.Get(longKey)
+	if ok {
+		t.Fatal("deleted long key still present")
+	}
 }
