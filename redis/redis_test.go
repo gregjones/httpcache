@@ -71,16 +71,16 @@ func TestConcurrency(t *testing.T) {
 	}
 
 	data := []testData{
-		testData{"one", []byte("1"), time.Second * 1},
-		testData{"two", []byte("2"), time.Second * 1},
-		testData{"three", []byte("3"), time.Second * 1},
-		testData{"four", []byte("4"), time.Second * 1},
-		testData{"five", []byte("5"), time.Second * 1},
-		testData{"six", []byte("6"), time.Second * 1},
-		testData{"seven", []byte("7"), time.Second * 1},
-		testData{"eight", []byte("8"), time.Second * 1},
-		testData{"nine", []byte("9"), time.Second * 1},
-		testData{"ten", []byte("10"), time.Second * 1},
+		{"one", []byte("1"), time.Second * 1},
+		{"two", []byte("2"), time.Second * 1},
+		{"three", []byte("3"), time.Second * 1},
+		{"four", []byte("4"), time.Second * 1},
+		{"five", []byte("5"), time.Second * 1},
+		{"six", []byte("6"), time.Second * 1},
+		{"seven", []byte("7"), time.Second * 1},
+		{"eight", []byte("8"), time.Second * 1},
+		{"nine", []byte("9"), time.Second * 1},
+		{"ten", []byte("10"), time.Second * 1},
 	}
 
 	pool := &redis.Pool{
