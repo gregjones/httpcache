@@ -3,8 +3,6 @@
 package leveldbcache
 
 import (
-	"time"
-
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -23,8 +21,8 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 	return resp, true
 }
 
-// Set saves a response to the cache as key. Duration is not implemented.
-func (c *Cache) Set(key string, resp []byte, duration time.Duration) {
+// Set saves a response to the cache as key.
+func (c *Cache) Set(key string, resp []byte) {
 	c.db.Put([]byte(key), resp, nil)
 }
 

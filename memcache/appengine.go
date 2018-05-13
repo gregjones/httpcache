@@ -9,8 +9,6 @@
 package memcache
 
 import (
-	"time"
-
 	"appengine"
 	"appengine/memcache"
 )
@@ -40,7 +38,7 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 }
 
 // Set saves a response to the cache as key and set to expire after the duration.
-func (c *Cache) Set(key string, resp []byte, duration time.Duration) {
+func (c *Cache) Set(key string, resp []byte) {
 	item := &memcache.Item{
 		Key:        cacheKey(key),
 		Value:      resp,

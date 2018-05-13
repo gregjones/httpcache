@@ -35,7 +35,7 @@ type Cache interface {
 	Get(key string) (responseBytes []byte, ok bool)
 	// Set stores the []byte representation of a response against a key with the
 	// remaining cache duration.
-	Set(key string, responseBytes []byte, duration time.Duration)
+	Set(key string, responseBytes []byte)
 	// Delete removes the value associated with the key
 	Delete(key string)
 }
@@ -50,7 +50,7 @@ func cacheKey(req *http.Request) string {
 func CachedResponse(c Cache, req *http.Request) (resp *http.Response, err error) {
 	cachedVal, ok := c.Get(cacheKey(req))
 	if !ok {
-		return
+		return resp, err
 	}
 
 	b := bytes.NewBuffer(cachedVal)
@@ -71,8 +71,8 @@ func (c *MemoryCache) Get(key string) (resp []byte, ok bool) {
 	return resp, ok
 }
 
-// Set saves response resp to the cache with key. Duration is not implemented.
-func (c *MemoryCache) Set(key string, resp []byte, duration time.Duration) {
+// Set saves response resp to the cache with key.
+func (c *MemoryCache) Set(key string, resp []byte) {
 	c.mu.Lock()
 	c.items[key] = resp
 	c.mu.Unlock()
@@ -102,7 +102,7 @@ func (r *onEOFReader) Read(p []byte) (n int, err error) {
 	if err == io.EOF {
 		r.runFunc()
 	}
-	return
+	return n, err
 }
 
 func (r *onEOFReader) Close() error {
@@ -293,8 +293,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 		respBytes, err := httputil.DumpResponse(resp, true)
 		if err == nil {
-			duration := cacheExpires(resp)
-			t.Cache.Set(cacheKey, respBytes, duration)
+			t.Cache.Set(cacheKey, respBytes)
 		}
 	} else {
 		t.Cache.Delete(cacheKey)
@@ -368,7 +367,7 @@ func Date(respHeaders http.Header) (date time.Time, err error) {
 	dateHeader := respHeaders.Get("date")
 	if dateHeader == "" {
 		err = ErrNoDateHeader
-		return
+		return date, err
 	}
 
 	return time.Parse(time.RFC1123, dateHeader)
