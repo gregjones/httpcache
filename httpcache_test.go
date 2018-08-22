@@ -394,6 +394,12 @@ func TestDontStorePartialRangeInCache(t *testing.T) {
 
 func TestRevalidateCompressedJSONResponses(t *testing.T) {
 	type some struct{ Some string }
+	readJsonResponse := func(rc io.ReadCloser) (some, error) {
+		defer rc.Close()
+		var got some
+		err := json.NewDecoder(rc).Decode(&got)
+		return got, err
+	}
 	{
 		req, err := http.NewRequest("GET", s.server.URL+"/compressedJson", nil)
 		if err != nil {
@@ -403,12 +409,10 @@ func TestRevalidateCompressedJSONResponses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var got some
-		err = json.NewDecoder(resp.Body).Decode(&got)
+		got, err := readJsonResponse(resp.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer resp.Body.Close()
 		want := some{"json"}
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
@@ -435,13 +439,10 @@ func TestRevalidateCompressedJSONResponses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var got some
-		err = json.NewDecoder(resp.Body).Decode(&got)
+		_, err = readJsonResponse(resp.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
-		// no defer here in order to update cache on Close call
-		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
 		}
@@ -462,7 +463,10 @@ func TestRevalidateCompressedJSONResponses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer resp.Body.Close()
+		_, err = readJsonResponse(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
 		}
