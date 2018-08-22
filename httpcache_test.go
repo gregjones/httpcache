@@ -2,6 +2,8 @@ package httpcache
 
 import (
 	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -54,6 +57,30 @@ func setup() {
 	mux.HandleFunc("/method", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=3600")
 		w.Write([]byte(r.Method))
+	}))
+
+	var compressedJsonCounter = 0
+	mux.HandleFunc("/compressedJson", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("accept-encoding"), "gzip") {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		compressedJsonCounter++
+		w.Header().Set("X-Counter", strconv.Itoa(compressedJsonCounter))
+
+		etag := "124567"
+		w.Header().Set("etag", etag)
+		if r.Header.Get("if-none-match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		w.Header().Set("Content-Encoding", "gzip")
+
+		gzw := gzip.NewWriter(w)
+		defer gzw.Close()
+		gzw.Write([]byte(`{"some": "json"}`))
 	}))
 
 	mux.HandleFunc("/range", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -365,10 +392,93 @@ func TestDontStorePartialRangeInCache(t *testing.T) {
 	}
 }
 
+func TestRevalidateCompressedJSONResponses(t *testing.T) {
+	type some struct{ Some string }
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/compressedJson", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got some
+		err = json.NewDecoder(resp.Body).Decode(&got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		want := some{"json"}
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if resp.Header.Get(XFromCache) != "" {
+			t.Error("XFromCache header isn't blank")
+		}
+		if resp.Header.Get("x-counter") != "1" {
+			t.Error("X-Counter header is not 1")
+		}
+		if resp.Header.Get("etag") == "" {
+			t.Error("ETag is blank")
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/compressedJson", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got some
+		err = json.NewDecoder(resp.Body).Decode(&got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// no defer here in order to update cache on Close call
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Errorf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+		if resp.Header.Get("x-counter") != "2" {
+			t.Error("X-Counter header is not 2")
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/compressedJson", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("cache-control", "only-if-cached")
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
+		}
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Errorf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+		if resp.Header.Get("x-counter") != "2" {
+			t.Error("X-Counter was not updated on revalidation")
+		}
+	}
+}
+
 func TestCacheOnlyIfBodyRead(t *testing.T) {
 	resetTest()
 	{
-		req, err := http.NewRequest("GET", s.server.URL, nil)
+		req, err := http.NewRequest("GET", s.server.URL+"/method", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -383,7 +493,7 @@ func TestCacheOnlyIfBodyRead(t *testing.T) {
 		resp.Body.Close()
 	}
 	{
-		req, err := http.NewRequest("GET", s.server.URL, nil)
+		req, err := http.NewRequest("GET", s.server.URL+"/method", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
