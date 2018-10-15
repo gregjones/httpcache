@@ -33,10 +33,13 @@ const (
 var cacheableResponseCodes = map[int]struct{}{
 	http.StatusOK:                   {}, // 200
 	http.StatusNonAuthoritativeInfo: {}, // 203
+	http.StatusCreated:              {}, // 201
+	http.StatusPartialContent:       {}, // 206
 	http.StatusMultipleChoices:      {}, // 300
 	http.StatusMovedPermanently:     {}, // 301
-	http.StatusFound:                {}, // 302
 	http.StatusNotFound:             {}, // 404
+	http.StatusMethodNotAllowed:     {}, // 405
+	http.StatusRequestURITooLong:    {}, // 414
 	http.StatusGone:                 {}, // 410
 }
 
@@ -508,10 +511,10 @@ func getEndToEndHeaders(respHeaders http.Header) []string {
 		"Keep-Alive":          struct{}{},
 		"Proxy-Authenticate":  struct{}{},
 		"Proxy-Authorization": struct{}{},
-		"Te":                struct{}{},
-		"Trailers":          struct{}{},
-		"Transfer-Encoding": struct{}{},
-		"Upgrade":           struct{}{},
+		"Te":                  struct{}{},
+		"Trailers":            struct{}{},
+		"Transfer-Encoding":   struct{}{},
+		"Upgrade":             struct{}{},
 	}
 
 	for _, extra := range strings.Split(respHeaders.Get("connection"), ",") {
