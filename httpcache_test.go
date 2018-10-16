@@ -8,8 +8,10 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -157,6 +159,20 @@ func setup() {
 				w.Write([]byte{0})
 			}
 		}
+	}))
+
+	mux.HandleFunc("/status/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		statusStr := strings.Trim(strings.TrimPrefix(r.URL.Path, "/status/"), "/")
+		statusInt, err := strconv.Atoi(statusStr)
+		if err != nil {
+			panic(err)
+		}
+		if statusInt == 301 || statusInt == 302 {
+			w.Header().Set("Location", "http://example.com")
+		}
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.WriteHeader(statusInt)
+		w.Write([]byte("Some text content"))
 	}))
 }
 
@@ -1471,5 +1487,34 @@ func TestClientTimeout(t *testing.T) {
 	}
 	if taken >= 2*time.Second {
 		t.Error("client.Do took 2+ seconds, want < 2 seconds")
+	}
+}
+
+func TestCacheableResponseCodes(t *testing.T) {
+	statusCaching := defaultCacheableResponseCodes
+
+	for statusInt := range statusCaching {
+		path := "/status/" + strconv.Itoa(statusInt)
+		req, err := http.NewRequest("GET", s.server.URL+path, nil)
+		resp, err := s.transport.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		httputil.DumpResponse(resp, true)
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatal("Initial request should not be cached")
+		}
+		if resp.StatusCode != statusInt {
+			t.Errorf("got %d, want %d", resp.StatusCode, statusInt)
+		}
+
+		resp2, err2 := s.transport.RoundTrip(req)
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+		httputil.DumpResponse(resp2, false)
+		if resp2.Header.Get(XFromCache) != "1" {
+			t.Errorf("HTTP %d requests should be cached", statusInt)
+		}
 	}
 }

@@ -27,6 +27,20 @@ const (
 	XFromCache = "X-From-Cache"
 )
 
+var defaultCacheableResponseCodes = map[int]struct{}{
+	http.StatusOK:                   {}, // 200
+	http.StatusCreated:              {}, // 201
+	http.StatusNonAuthoritativeInfo: {}, // 203
+	http.StatusMultipleChoices:      {}, // 300
+	http.StatusMovedPermanently:     {}, // 301
+	http.StatusFound:                {}, // 302
+	http.StatusNotFound:             {}, // 404
+	http.StatusMethodNotAllowed:     {}, // 405
+	http.StatusGone:                 {}, // 410
+	http.StatusRequestURITooLong:    {}, // 414
+	http.StatusNotImplemented:       {}, // 501
+}
+
 // A Cache interface is used by the Transport to store and retrieve responses.
 type Cache interface {
 	// Get returns the []byte representation of a cached response and a bool
@@ -103,12 +117,25 @@ type Transport struct {
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
+	// cacheableResponseCodes holds the set of cacheable response codes
+	cacheableResponseCodes map[int]struct{}
 }
+
+// Opt is a config option func
+type Opt func(*Transport)
 
 // NewTransport returns a new Transport with the
 // provided Cache implementation and MarkCachedResponses set to true
-func NewTransport(c Cache) *Transport {
-	return &Transport{Cache: c, MarkCachedResponses: true}
+func NewTransport(c Cache, opts ...Opt) *Transport {
+	tr := &Transport{
+		Cache:                  c,
+		MarkCachedResponses:    true,
+		cacheableResponseCodes: defaultCacheableResponseCodes,
+	}
+	for _, o := range opts {
+		o(tr)
+	}
+	return tr
 }
 
 // Client returns an *http.Client that caches responses.
@@ -218,7 +245,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 	}
 
-	if cacheable && canStore(parseCacheControl(req.Header), parseCacheControl(resp.Header)) {
+	if cacheable && t.canStore(resp.StatusCode, parseCacheControl(req.Header), parseCacheControl(resp.Header)) {
 		for _, varyKey := range headerAllCommaSepValues(resp.Header, "vary") {
 			varyKey = http.CanonicalHeaderKey(varyKey)
 			fakeHeader := "X-Varied-" + varyKey
@@ -420,10 +447,10 @@ func getEndToEndHeaders(respHeaders http.Header) []string {
 		"Keep-Alive":          struct{}{},
 		"Proxy-Authenticate":  struct{}{},
 		"Proxy-Authorization": struct{}{},
-		"Te":                struct{}{},
-		"Trailers":          struct{}{},
-		"Transfer-Encoding": struct{}{},
-		"Upgrade":           struct{}{},
+		"Te":                  struct{}{},
+		"Trailers":            struct{}{},
+		"Transfer-Encoding":   struct{}{},
+		"Upgrade":             struct{}{},
 	}
 
 	for _, extra := range strings.Split(respHeaders.Get("connection"), ",") {
@@ -441,7 +468,10 @@ func getEndToEndHeaders(respHeaders http.Header) []string {
 	return endToEndHeaders
 }
 
-func canStore(reqCacheControl, respCacheControl cacheControl) (canStore bool) {
+func (t *Transport) canStore(code int, reqCacheControl, respCacheControl cacheControl) (canStore bool) {
+	if _, ok := t.cacheableResponseCodes[code]; !ok {
+		return false
+	}
 	if _, ok := respCacheControl["no-store"]; ok {
 		return false
 	}
@@ -544,8 +574,8 @@ func (r *cachingReadCloser) Close() error {
 }
 
 // NewMemoryCacheTransport returns a new Transport using the in-memory cache implementation
-func NewMemoryCacheTransport() *Transport {
+func NewMemoryCacheTransport(opts ...Opt) *Transport {
 	c := NewMemoryCache()
-	t := NewTransport(c)
+	t := NewTransport(c, opts...)
 	return t
 }
