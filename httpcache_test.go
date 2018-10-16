@@ -1226,13 +1226,16 @@ func TestStaleIfErrorResponseLifetime(t *testing.T) {
 func TestGetWithStatuseCodes(t *testing.T) {
 	statusCaching := map[int]bool{
 		// Cacheable status codes
-		http.StatusOK:                   true,
-		http.StatusNonAuthoritativeInfo: true,
-		http.StatusMultipleChoices:      true,
-		http.StatusMovedPermanently:     true,
-		http.StatusFound:                true,
-		http.StatusNotFound:             true,
-		http.StatusGone:                 true,
+		http.StatusOK:                   true, // 200
+		http.StatusNonAuthoritativeInfo: true, // 203
+		http.StatusCreated:              true, // 201
+		http.StatusPartialContent:       true, // 206
+		http.StatusMultipleChoices:      true, // 300
+		http.StatusMovedPermanently:     true, // 301
+		http.StatusNotFound:             true, // 404
+		http.StatusMethodNotAllowed:     true, // 405
+		http.StatusRequestURITooLong:    true, // 414
+		http.StatusGone:                 true, // 410
 		// Some NOT-Cacheable status codes
 		http.StatusNotModified:         false,
 		http.StatusBadRequest:          false,
