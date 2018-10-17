@@ -1491,30 +1491,39 @@ func TestClientTimeout(t *testing.T) {
 }
 
 func TestCacheableResponseCodes(t *testing.T) {
-	statusCaching := defaultCacheableResponseCodes
+	var testTable = map[bool]map[int]struct{}{
+		true: defaultCacheableResponseCodes,
+		false: {
+			http.StatusAccepted:        {},
+			http.StatusAlreadyReported: {},
+			http.StatusBadGateway:      {},
+		},
+	}
+	for cacheable, codes := range testTable {
+		for statusInt := range codes {
+			path := "/status/" + strconv.Itoa(statusInt)
+			req, err := http.NewRequest("GET", s.server.URL+path, nil)
+			resp, err := s.transport.RoundTrip(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			httputil.DumpResponse(resp, true)
+			if resp.Header.Get(XFromCache) != "" {
+				t.Fatal("Initial request should not be cached")
+			}
+			if resp.StatusCode != statusInt {
+				t.Errorf("got %d, want %d", resp.StatusCode, statusInt)
+			}
 
-	for statusInt := range statusCaching {
-		path := "/status/" + strconv.Itoa(statusInt)
-		req, err := http.NewRequest("GET", s.server.URL+path, nil)
-		resp, err := s.transport.RoundTrip(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		httputil.DumpResponse(resp, true)
-		if resp.Header.Get(XFromCache) != "" {
-			t.Fatal("Initial request should not be cached")
-		}
-		if resp.StatusCode != statusInt {
-			t.Errorf("got %d, want %d", resp.StatusCode, statusInt)
-		}
-
-		resp2, err2 := s.transport.RoundTrip(req)
-		if err2 != nil {
-			t.Fatal(err2)
-		}
-		httputil.DumpResponse(resp2, false)
-		if resp2.Header.Get(XFromCache) != "1" {
-			t.Errorf("HTTP %d requests should be cached", statusInt)
+			resp2, err2 := s.transport.RoundTrip(req)
+			if err2 != nil {
+				t.Fatal(err2)
+			}
+			httputil.DumpResponse(resp2, false)
+			isCached := resp2.Header.Get(XFromCache) == "1"
+			if isCached != cacheable {
+				t.Errorf("expected HTTP %d cacheable = %t, but got %t", statusInt, cacheable, isCached)
+			}
 		}
 	}
 }
