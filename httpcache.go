@@ -124,6 +124,13 @@ type Transport struct {
 // Opt is a config option func
 type Opt func(*Transport)
 
+// WithCacheableResponseCodes configures the set of response codes that are considered cacheable
+func WithCacheableResponseCodes(codes map[int]struct{}) Opt {
+	return func(t *Transport) {
+		t.cacheableResponseCodes = codes
+	}
+}
+
 // NewTransport returns a new Transport with the
 // provided Cache implementation and MarkCachedResponses set to true
 func NewTransport(c Cache, opts ...Opt) *Transport {
