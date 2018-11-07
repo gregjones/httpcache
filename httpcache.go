@@ -138,21 +138,34 @@ func varyMatches(cachedResp *http.Response, req *http.Request) bool {
 // will be returned.
 func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	cacheKey := cacheKey(req)
-	cacheable := (req.Method == "GET" || req.Method == "HEAD") && req.Header.Get("range") == ""
-	var cachedResp *http.Response
-	if cacheable {
-		cachedResp, err = CachedResponse(t.Cache, req)
-	} else {
-		// Need to invalidate an existing value
-		t.Cache.Delete(cacheKey)
-	}
 
 	transport := t.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
 
-	if cacheable && cachedResp != nil && err == nil {
+	cacheable := (req.Method == "GET" || req.Method == "HEAD") && req.Header.Get("range") == ""
+	if !cacheable {
+		t.Cache.Delete(cacheKey)
+		return transport.RoundTrip(req)
+	}
+
+	cachedResp, err := CachedResponse(t.Cache, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if cachedResp == nil {
+		reqCacheControl := parseCacheControl(req.Header)
+		if _, ok := reqCacheControl["only-if-cached"]; ok {
+			resp = newGatewayTimeoutResponse(req)
+		} else {
+			resp, err = transport.RoundTrip(req)
+			if err != nil {
+				return resp, err
+			}
+		}
+	} else {
 		if t.MarkCachedResponses {
 			cachedResp.Header.Set(XFromCache, "1")
 		}
@@ -186,70 +199,67 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 
 		resp, err = transport.RoundTrip(req)
-		if err == nil && req.Method == "GET" && resp.StatusCode == http.StatusNotModified {
+		if err != nil {
+			if canStaleOnError(req, cachedResp.Header) {
+				// In case of transport failure and stale-if-error activated, returns cached content
+				// when available
+				return cachedResp, nil
+			}
+			t.Cache.Delete(cacheKey)
+			return resp, err
+		}
+
+		if req.Method == "GET" && resp.StatusCode == http.StatusNotModified {
 			// Replace the 304 response with the one from cache, but update with some new headers
 			endToEndHeaders := getEndToEndHeaders(resp.Header)
 			for _, header := range endToEndHeaders {
 				cachedResp.Header[header] = resp.Header[header]
 			}
 			resp = cachedResp
-		} else if (err != nil || (cachedResp != nil && resp.StatusCode >= 500)) &&
-			req.Method == "GET" && canStaleOnError(cachedResp.Header, req.Header) {
+		} else if resp.StatusCode >= 500 && canStaleOnError(req, cachedResp.Header) {
 			// In case of transport failure and stale-if-error activated, returns cached content
 			// when available
 			return cachedResp, nil
-		} else {
-			if err != nil || resp.StatusCode != http.StatusOK {
-				t.Cache.Delete(cacheKey)
-			}
-			if err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		reqCacheControl := parseCacheControl(req.Header)
-		if _, ok := reqCacheControl["only-if-cached"]; ok {
-			resp = newGatewayTimeoutResponse(req)
-		} else {
-			resp, err = transport.RoundTrip(req)
-			if err != nil {
-				return nil, err
-			}
+		} else if resp.StatusCode != http.StatusOK {
+			t.Cache.Delete(cacheKey)
 		}
 	}
 
-	if cacheable && canStore(parseCacheControl(req.Header), parseCacheControl(resp.Header)) {
-		for _, varyKey := range headerAllCommaSepValues(resp.Header, "vary") {
-			varyKey = http.CanonicalHeaderKey(varyKey)
-			fakeHeader := "X-Varied-" + varyKey
-			reqValue := req.Header.Get(varyKey)
-			if reqValue != "" {
-				resp.Header.Set(fakeHeader, reqValue)
-			}
-		}
-		switch req.Method {
-		case "GET":
-			// Delay caching until EOF is reached.
-			resp.Body = &cachingReadCloser{
-				R: resp.Body,
-				OnEOF: func(r io.Reader) {
-					resp := *resp
-					resp.Body = ioutil.NopCloser(r)
-					respBytes, err := httputil.DumpResponse(&resp, true)
-					if err == nil {
-						t.Cache.Set(cacheKey, respBytes)
-					}
-				},
-			}
-		default:
-			respBytes, err := httputil.DumpResponse(resp, true)
-			if err == nil {
-				t.Cache.Set(cacheKey, respBytes)
-			}
-		}
-	} else {
+	if !canStore(parseCacheControl(req.Header), parseCacheControl(resp.Header)) {
 		t.Cache.Delete(cacheKey)
+		return resp, nil
 	}
+
+	for _, varyKey := range headerAllCommaSepValues(resp.Header, "vary") {
+		varyKey = http.CanonicalHeaderKey(varyKey)
+		fakeHeader := "X-Varied-" + varyKey
+		reqValue := req.Header.Get(varyKey)
+		if reqValue != "" {
+			resp.Header.Set(fakeHeader, reqValue)
+		}
+	}
+	switch req.Method {
+	case "GET":
+		// Delay caching until EOF is reached.
+		resp.Body = &cachingReadCloser{
+			R: resp.Body,
+			OnEOF: func(r io.Reader) {
+				resp := *resp
+				resp.Body = ioutil.NopCloser(r)
+				respBytes, err := httputil.DumpResponse(&resp, true)
+				if err == nil {
+					t.Cache.Set(cacheKey, respBytes)
+				}
+			},
+		}
+	default:
+		respBytes, err := httputil.DumpResponse(resp, true)
+		if err != nil {
+			return resp, err
+		}
+		t.Cache.Set(cacheKey, respBytes)
+	}
+
 	return resp, nil
 }
 
@@ -371,9 +381,13 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 
 // Returns true if either the request or the response includes the stale-if-error
 // cache control extension: https://tools.ietf.org/html/rfc5861
-func canStaleOnError(respHeaders, reqHeaders http.Header) bool {
+func canStaleOnError(req *http.Request, respHeaders http.Header) bool {
+	if req.Method != "HEAD" && req.Method != "GET" {
+		return false
+	}
+
 	respCacheControl := parseCacheControl(respHeaders)
-	reqCacheControl := parseCacheControl(reqHeaders)
+	reqCacheControl := parseCacheControl(req.Header)
 
 	var err error
 	lifetime := time.Duration(-1)
