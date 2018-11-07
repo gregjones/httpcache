@@ -166,7 +166,7 @@ func teardown() {
 }
 
 func resetTest() {
-	s.transport.Cache = NewMemoryCache()
+	s.transport.Cache = NewBufferedStreamingCache(NewMemoryCache())
 	clock = &realClock{}
 }
 

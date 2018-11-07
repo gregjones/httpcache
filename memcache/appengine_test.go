@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"appengine/aetest"
+	"github.com/gregjones/httpcache"
 	"github.com/gregjones/httpcache/test"
 )
 
@@ -16,5 +17,5 @@ func TestAppEngine(t *testing.T) {
 	}
 	defer ctx.Close()
 
-	test.Cache(t, New(ctx))
+	test.StreamingCache(t, httpcache.NewBufferedStreamingCache(New(ctx)))
 }

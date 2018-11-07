@@ -15,5 +15,5 @@ func TestDiskCache(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	test.Cache(t, New(tempDir))
+	test.StreamingCache(t, New(tempDir))
 }

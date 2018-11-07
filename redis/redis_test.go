@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/gomodule/redigo/redis"
+	"github.com/gregjones/httpcache"
 	"github.com/gregjones/httpcache/test"
 )
 
@@ -15,5 +16,5 @@ func TestRedisCache(t *testing.T) {
 	}
 	conn.Do("FLUSHALL")
 
-	test.Cache(t, NewWithClient(conn))
+	test.StreamingCache(t, httpcache.NewBufferedStreamingCache(NewWithClient(conn)))
 }

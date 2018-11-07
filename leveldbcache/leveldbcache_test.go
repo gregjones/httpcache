@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gregjones/httpcache"
 	"github.com/gregjones/httpcache/test"
 )
 
@@ -21,5 +22,5 @@ func TestDiskCache(t *testing.T) {
 		t.Fatalf("New leveldb,: %v", err)
 	}
 
-	test.Cache(t, cache)
+	test.StreamingCache(t, httpcache.NewBufferedStreamingCache(cache))
 }

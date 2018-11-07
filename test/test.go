@@ -2,13 +2,15 @@ package test
 
 import (
 	"bytes"
+	"io/ioutil"
+	"os"
 	"testing"
 
 	"github.com/gregjones/httpcache"
 )
 
-// Cache excercises a httpcache.Cache implementation.
-func Cache(t *testing.T, cache httpcache.Cache) {
+// StreamingCache excercises a httpcache.StreamingCache implementation.
+func StreamingCache(t *testing.T, cache httpcache.StreamingCache) {
 	key := "testKey"
 	_, ok := cache.Get(key)
 	if ok {
@@ -31,5 +33,29 @@ func Cache(t *testing.T, cache httpcache.Cache) {
 	_, ok = cache.Get(key)
 	if ok {
 		t.Fatal("deleted key still present")
+	}
+
+	reader, err := cache.GetReader(key)
+	if !os.IsNotExist(err) {
+		t.Fatalf("deleted key still present: %s", err)
+	}
+
+	err = cache.SetReader(key, bytes.NewBuffer(val))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reader, err = cache.GetReader(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	retVal, err = ioutil.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(retVal, val) {
+		t.Fatal("retrieved a different value than what we put in")
 	}
 }

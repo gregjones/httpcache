@@ -6,6 +6,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/gregjones/httpcache"
 	"github.com/gregjones/httpcache/test"
 )
 
@@ -20,5 +21,5 @@ func TestMemCache(t *testing.T) {
 	conn.Write([]byte("flush_all\r\n")) // flush memcache
 	conn.Close()
 
-	test.Cache(t, New(testServer))
+	test.StreamingCache(t, httpcache.NewBufferedStreamingCache(New(testServer)))
 }
