@@ -123,12 +123,18 @@ type Transport struct {
 	Cache     StreamingCache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
+
+	clock timer
 }
 
 // NewTransport returns a new Transport with the
 // provided Cache implementation and MarkCachedResponses set to true
 func NewTransport(c StreamingCache) *Transport {
-	return &Transport{Cache: c, MarkCachedResponses: true}
+	return &Transport{
+		Cache:               c,
+		MarkCachedResponses: true,
+		clock:               &realClock{},
+	}
 }
 
 // Client returns an *http.Client that caches responses.
@@ -193,7 +199,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 
 		if varyMatches(cachedResp, req) {
 			// Can only use cached value if the new request doesn't Vary significantly
-			freshness := getFreshness(cachedResp.Header, req.Header)
+			freshness := getFreshness(t.clock, cachedResp.Header, req.Header)
 			if freshness == fresh {
 				return cachedResp, nil
 			}
@@ -221,7 +227,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 
 		resp, err = transport.RoundTrip(req)
 		if err != nil {
-			if canStaleOnError(req, cachedResp.Header) {
+			if canStaleOnError(t.clock, req, cachedResp.Header) {
 				// In case of transport failure and stale-if-error activated, returns cached content
 				// when available
 				return cachedResp, nil
@@ -238,7 +244,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 				cachedResp.Header[header] = resp.Header[header]
 			}
 			resp = cachedResp
-		} else if resp.StatusCode >= 500 && canStaleOnError(req, cachedResp.Header) {
+		} else if resp.StatusCode >= 500 && canStaleOnError(t.clock, req, cachedResp.Header) {
 			// In case of transport failure and stale-if-error activated, returns cached content
 			// when available
 			return cachedResp, nil
@@ -302,8 +308,6 @@ type timer interface {
 	since(d time.Time) time.Duration
 }
 
-var clock timer = &realClock{}
-
 // getFreshness will return one of fresh/stale/transparent based on the cache-control
 // values of the request and the response
 //
@@ -313,7 +317,7 @@ var clock timer = &realClock{}
 //
 // Because this is only a private cache, 'public' and 'private' in cache-control aren't
 // signficant. Similarly, smax-age isn't used.
-func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
+func getFreshness(clock timer, respHeaders, reqHeaders http.Header) (freshness int) {
 	respCacheControl := parseCacheControl(respHeaders)
 	reqCacheControl := parseCacheControl(reqHeaders)
 	if _, ok := reqCacheControl["no-cache"]; ok {
@@ -329,6 +333,9 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	date, err := Date(respHeaders)
 	if err != nil {
 		return stale
+	}
+	if clock == nil {
+		clock = &realClock{}
 	}
 	currentAge := clock.since(date)
 
@@ -396,7 +403,7 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 
 // Returns true if either the request or the response includes the stale-if-error
 // cache control extension: https://tools.ietf.org/html/rfc5861
-func canStaleOnError(req *http.Request, respHeaders http.Header) bool {
+func canStaleOnError(clock timer, req *http.Request, respHeaders http.Header) bool {
 	if req.Method != "HEAD" && req.Method != "GET" {
 		return false
 	}
@@ -432,6 +439,9 @@ func canStaleOnError(req *http.Request, respHeaders http.Header) bool {
 		date, err := Date(respHeaders)
 		if err != nil {
 			return false
+		}
+		if clock == nil {
+			clock = &realClock{}
 		}
 		currentAge := clock.since(date)
 		if lifetime > currentAge {
