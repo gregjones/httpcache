@@ -19,10 +19,19 @@ import (
 	"time"
 )
 
+// Freshness is used to indicate whether a cached response is suitable to be used to fultil a request.
+type Freshness int
+
 const (
-	stale = iota
-	fresh
-	transparent
+	// Stale is used to indicate that the response needs validating before it is returned.
+	Stale Freshness = iota
+	// Fresh is used to indicate that the response can be returned.
+	Fresh
+	// Transparent is used to indicate that the response should not be used to fulfil the request.
+	Transparent
+)
+
+const (
 	// XFromCache is the header added to responses that are returned from the cache
 	XFromCache = "X-From-Cache"
 )
@@ -103,6 +112,8 @@ type Transport struct {
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
+	// If non-nil, FreshnessFunc is used to compute the freshness of a response.
+	FreshnessFunc func(req http.Request, res http.Response) Freshness
 }
 
 // NewTransport returns a new Transport with the
@@ -158,13 +169,22 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		}
 
 		if varyMatches(cachedResp, req) {
-			// Can only use cached value if the new request doesn't Vary significantly
-			freshness := getFreshness(cachedResp.Header, req.Header)
-			if freshness == fresh {
+			// Compute the freshness of the cached response.
+			// If a custom freshness function has been specified, it is used instead of the default one.
+			var (
+				freshness Freshness
+			)
+			if t.FreshnessFunc != nil {
+				freshness = t.FreshnessFunc(*req, *cachedResp)
+			} else {
+				freshness = getFreshness(cachedResp.Header, req.Header)
+			}
+
+			if freshness == Fresh {
 				return cachedResp, nil
 			}
 
-			if freshness == stale {
+			if freshness == Stale {
 				var req2 *http.Request
 				// Add validators if caller hasn't already done so
 				etag := cachedResp.Header.Get("etag")
@@ -279,31 +299,31 @@ type timer interface {
 
 var clock timer = &realClock{}
 
-// getFreshness will return one of fresh/stale/transparent based on the cache-control
+// getFreshness will return one of Fresh/Stale/Transparent based on the cache-control
 // values of the request and the response
 //
-// fresh indicates the response can be returned
-// stale indicates that the response needs validating before it is returned
-// transparent indicates the response should not be used to fulfil the request
+// Fresh indicates the response can be returned
+// Stale indicates that the response needs validating before it is returned
+// Transparent indicates the response should not be used to fulfil the request
 //
 // Because this is only a private cache, 'public' and 'private' in cache-control aren't
 // signficant. Similarly, smax-age isn't used.
-func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
+func getFreshness(respHeaders, reqHeaders http.Header) (freshness Freshness) {
 	respCacheControl := parseCacheControl(respHeaders)
 	reqCacheControl := parseCacheControl(reqHeaders)
 	if _, ok := reqCacheControl["no-cache"]; ok {
-		return transparent
+		return Transparent
 	}
 	if _, ok := respCacheControl["no-cache"]; ok {
-		return stale
+		return Stale
 	}
 	if _, ok := reqCacheControl["only-if-cached"]; ok {
-		return fresh
+		return Fresh
 	}
 
 	date, err := Date(respHeaders)
 	if err != nil {
-		return stale
+		return Stale
 	}
 	currentAge := clock.since(date)
 
@@ -354,7 +374,7 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 		// but that seems like a  hassle, and is it actually useful? If so, then there needs to be a different
 		// return-value available here.
 		if maxstale == "" {
-			return fresh
+			return Fresh
 		}
 		maxstaleDuration, err := time.ParseDuration(maxstale + "s")
 		if err == nil {
@@ -363,10 +383,10 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 	}
 
 	if lifetime > currentAge {
-		return fresh
+		return Fresh
 	}
 
-	return stale
+	return Stale
 }
 
 // Returns true if either the request or the response includes the stale-if-error
