@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"appengine/aetest"
-	"github.com/gregjones/httpcache/test"
+	"github.com/lggomez/httpcache/test"
 )
 
 func TestAppEngine(t *testing.T) {
