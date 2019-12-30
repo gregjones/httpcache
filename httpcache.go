@@ -27,7 +27,7 @@ const (
 	XFromCache = "X-From-Cache"
 )
 
-// A Cache interface is used by the Transport to store and retrieve responses.
+// A Cache interface is used by the CachedClient to store and retrieve responses.
 type Cache interface {
 	// Get returns the []byte representation of a cached response and a bool
 	// set to true if the value isn't empty
@@ -36,6 +36,11 @@ type Cache interface {
 	Set(key string, responseBytes []byte)
 	// Delete removes the value associated with the key
 	Delete(key string)
+}
+
+// A Doer interface abstracts the http request execution from the client implementation
+type Doer interface {
+	Do(req *http.Request) (*http.Response, error)
 }
 
 // cacheKey returns the cache key for req.
@@ -93,27 +98,27 @@ func NewMemoryCache() *MemoryCache {
 	return c
 }
 
-// Transport is an implementation of http.RoundTripper that will return values from a cache
+// CachedClient is an implementation of http.RoundTripper that will return values from a cache
 // where possible (avoiding a network request) and will additionally add validators (etag/if-modified-since)
 // to repeated requests allowing servers to return 304 / Not Modified
-type Transport struct {
-	// The RoundTripper interface actually used to make requests
-	// If nil, http.DefaultTransport is used
-	Transport http.RoundTripper
+type CachedClient struct {
+	Transport http.Transport
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
 }
 
-// NewTransport returns a new Transport with the
+// NewCachedClient returns a new Transport with the
 // provided Cache implementation and MarkCachedResponses set to true
-func NewTransport(c Cache) *Transport {
-	return &Transport{Cache: c, MarkCachedResponses: true}
+func NewCachedClient(c Cache, markCached bool) Doer {
+	return &CachedClient{Cache: c, MarkCachedResponses: markCached}
 }
 
-// Client returns an *http.Client that caches responses.
-func (t *Transport) Client() *http.Client {
-	return &http.Client{Transport: t}
+// NewMemoryCachedClient returns a new Transport using the in-memory cache implementation
+func NewMemoryCachedClient() Doer {
+	c := NewMemoryCache()
+	t := NewCachedClient(c, true)
+	return t
 }
 
 // varyMatches will return false unless all of the cached values for the headers listed in Vary
@@ -136,7 +141,7 @@ func varyMatches(cachedResp *http.Response, req *http.Request) bool {
 // If there is a stale Response, then any validators it contains will be set on the new request
 // to give the server a chance to respond with NotModified. If this happens, then the cached Response
 // will be returned.
-func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+func (t *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 	cacheKey := cacheKey(req)
 	cacheable := (req.Method == "GET" || req.Method == "HEAD") && req.Header.Get("range") == ""
 	var cachedResp *http.Response
@@ -145,11 +150,6 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 	} else {
 		// Need to invalidate an existing value
 		t.Cache.Delete(cacheKey)
-	}
-
-	transport := t.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
 	}
 
 	if cacheable && cachedResp != nil && err == nil {
@@ -185,7 +185,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			}
 		}
 
-		resp, err = transport.RoundTrip(req)
+		resp, err = t.Transport.RoundTrip(req)
 		if err == nil && req.Method == "GET" && resp.StatusCode == http.StatusNotModified {
 			// Replace the 304 response with the one from cache, but update with some new headers
 			endToEndHeaders := getEndToEndHeaders(resp.Header)
@@ -215,7 +215,7 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		if _, ok := reqCacheControl["only-if-cached"]; ok {
 			resp = newGatewayTimeoutResponse(req)
 		} else {
-			resp, err = transport.RoundTrip(req)
+			resp, err = t.Transport.RoundTrip(req)
 			if err != nil {
 				return nil, err
 			}
@@ -545,11 +545,4 @@ func (r *cachingReadCloser) Read(p []byte) (n int, err error) {
 
 func (r *cachingReadCloser) Close() error {
 	return r.R.Close()
-}
-
-// NewMemoryCacheTransport returns a new Transport using the in-memory cache implementation
-func NewMemoryCacheTransport() *Transport {
-	c := NewMemoryCache()
-	t := NewTransport(c)
-	return t
 }
