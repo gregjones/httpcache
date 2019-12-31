@@ -110,12 +110,12 @@ type CachedClient struct {
 
 // NewCachedClient returns a new Transport with the
 // provided Cache implementation and MarkCachedResponses set to true
-func NewCachedClient(c Cache, t http.Transport, markCached bool) Doer {
+func NewCachedClient(c Cache, t http.RoundTripper, markCached bool) Doer {
 	return &CachedClient{Cache: c, MarkCachedResponses: markCached}
 }
 
 // NewMemoryCachedClient returns a new Transport using the in-memory cache implementation
-func NewMemoryCachedClient(t http.Transport) Doer {
+func NewMemoryCachedClient(t http.RoundTripper) Doer {
 	c := NewMemoryCache()
 	cc := NewCachedClient(c, t, true)
 	return cc
