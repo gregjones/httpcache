@@ -39,7 +39,7 @@ func TestMain(m *testing.M) {
 }
 
 func setup() {
-	s.client = &CachedClient{Cache: NewMemoryCache(), MarkCachedResponses: true, Transport: http.Transport{}}
+	s.client = &CachedClient{Cache: NewMemoryCache(), MarkCachedResponses: true, Transport: &http.Transport{}}
 	s.done = make(chan struct{})
 
 	mux := http.NewServeMux()
@@ -1208,7 +1208,7 @@ func TestStaleIfErrorRequest(t *testing.T) {
 	tp := &CachedClient{
 		Cache:               NewMemoryCache(),
 		MarkCachedResponses: true,
-		Transport: http.Transport{
+		Transport: &http.Transport{
 			DialContext: func(_ context.Context, network, _ string) (net.Conn, error) {
 				return net.Dial(network, s.server.Listener.Addr().String())
 			},
@@ -1260,7 +1260,7 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 	tp := &CachedClient{
 		Cache:               NewMemoryCache(),
 		MarkCachedResponses: true,
-		Transport: http.Transport{
+		Transport: &http.Transport{
 			DialContext: func(_ context.Context, network, _ string) (net.Conn, error) {
 				return net.Dial(network, s.server.Listener.Addr().String())
 			},
@@ -1330,7 +1330,7 @@ func TestStaleIfErrorResponse(t *testing.T) {
 	tp := &CachedClient{
 		Cache:               NewMemoryCache(),
 		MarkCachedResponses: true,
-		Transport: http.Transport{
+		Transport: &http.Transport{
 			DialContext: func(_ context.Context, network, _ string) (net.Conn, error) {
 				return net.Dial(network, s.server.Listener.Addr().String())
 			},

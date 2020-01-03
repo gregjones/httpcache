@@ -102,7 +102,7 @@ func NewMemoryCache() *MemoryCache {
 // where possible (avoiding a network request) and will additionally add validators (etag/if-modified-since)
 // to repeated requests allowing servers to return 304 / Not Modified
 type CachedClient struct {
-	Transport http.Transport
+	Transport http.RoundTripper
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
@@ -110,14 +110,14 @@ type CachedClient struct {
 
 // NewCachedClient returns a new Transport with the
 // provided Cache implementation and MarkCachedResponses set to true
-func NewCachedClient(c Cache, t http.RoundTripper, markCached bool) Doer {
-	return &CachedClient{Cache: c, MarkCachedResponses: markCached}
+func NewCachedClient(c Cache, client *http.Client, markCached bool) Doer {
+	return &CachedClient{Cache: c, Transport: client.Transport, MarkCachedResponses: markCached}
 }
 
 // NewMemoryCachedClient returns a new Transport using the in-memory cache implementation
-func NewMemoryCachedClient(t http.RoundTripper) Doer {
+func NewMemoryCachedClient(client *http.Client) Doer {
 	c := NewMemoryCache()
-	cc := NewCachedClient(c, t, true)
+	cc := NewCachedClient(c, client, true)
 	return cc
 }
 
