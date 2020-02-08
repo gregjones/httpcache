@@ -20,6 +20,7 @@ Cache Backends
 - [`github.com/die-net/lrucache`](https://github.com/die-net/lrucache) provides an in-memory cache that will evict least-recently used entries.
 - [`github.com/die-net/lrucache/twotier`](https://github.com/die-net/lrucache/tree/master/twotier) allows caches to be combined, for example to use lrucache above with a persistent disk-cache.
 - [`github.com/birkelund/boltdbcache`](https://github.com/birkelund/boltdbcache) provides a BoltDB implementation (based on the [bbolt](https://github.com/coreos/bbolt) fork).
+- [`github.com/bamnet/docstorecache`](https://github.com/bamnet/docstorecache) provides a cache using any provider supported by Go Cloud [docstore](https://gocloud.dev/docstore).
 
 If you implement any other backend and wish it to be linked here, please send a PR editing this file.
 
