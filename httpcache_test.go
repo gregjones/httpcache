@@ -718,7 +718,7 @@ func TestGetWithDoubleVary(t *testing.T) {
 func TestGetWith2VaryHeaders(t *testing.T) {
 	resetTest()
 	// Tests that multiple Vary headers' comma-separated lists are
-	// merged. See https://github.com/lggomez/httpcache/issues/27.
+	// merged. See https://github.com/gregjones/httpcache/issues/27.
 	const (
 		accept         = "text/plain"
 		acceptLanguage = "da, en-gb;q=0.8, en;q=0.7"
@@ -882,7 +882,7 @@ func TestUpdateFields(t *testing.T) {
 	}
 }
 
-// This tests the fix for https://github.com/lggomez/httpcache/issues/74.
+// This tests the fix for https://github.com/gregjones/httpcache/issues/74.
 // Previously, after validating a cached response, its StatusCode
 // was incorrectly being replaced.
 func TestCachedErrorsKeepStatus(t *testing.T) {
@@ -1456,7 +1456,7 @@ func TestStaleIfErrorResponse(t *testing.T) {
 // 	}
 // }
 
-// This tests the fix for https://github.com/lggomez/httpcache/issues/74.
+// This tests the fix for https://github.com/gregjones/httpcache/issues/74.
 // Previously, after a stale response was used after encountering an error,
 // its StatusCode was being incorrectly replaced.
 // func TestStaleIfErrorKeepsStatus(t *testing.T) {
