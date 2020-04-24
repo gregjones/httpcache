@@ -2,12 +2,10 @@ package httpcache
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"flag"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1243,11 +1241,7 @@ func TestStaleIfErrorRequest(t *testing.T) {
 	tp := &CachedClient{
 		Cache:               NewMemoryCache(),
 		MarkCachedResponses: true,
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, network, _ string) (net.Conn, error) {
-				return net.Dial(network, s.server.Listener.Addr().String())
-			},
-		},
+		Transport:           &tmock,
 	}
 
 	// First time, response is cached on success
@@ -1295,11 +1289,7 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 	tp := &CachedClient{
 		Cache:               NewMemoryCache(),
 		MarkCachedResponses: true,
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, network, _ string) (net.Conn, error) {
-				return net.Dial(network, s.server.Listener.Addr().String())
-			},
-		},
+		Transport:           &tmock,
 	}
 
 	// First time, response is cached on success
@@ -1365,11 +1355,7 @@ func TestStaleIfErrorResponse(t *testing.T) {
 	tp := &CachedClient{
 		Cache:               NewMemoryCache(),
 		MarkCachedResponses: true,
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, network, _ string) (net.Conn, error) {
-				return net.Dial(network, s.server.Listener.Addr().String())
-			},
-		},
+		Transport:           &tmock,
 	}
 
 	// First time, response is cached on success
@@ -1398,121 +1384,113 @@ func TestStaleIfErrorResponse(t *testing.T) {
 	}
 }
 
-// func TestStaleIfErrorResponseLifetime(t *testing.T) {
-// 	resetTest()
-// 	now := time.Now()
-// 	tmock := transportMock{
-// 		response: &http.Response{
-// 			Status:     http.StatusText(http.StatusOK),
-// 			StatusCode: http.StatusOK,
-// 			Header: http.Header{
-// 				"Date":          []string{now.Format(time.RFC1123)},
-// 				"Cache-Control": []string{"no-cache, stale-if-error=100"},
-// 			},
-// 			Body: ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
-// 		},
-// 		err: nil,
-// 	}
-// 	tp := &CachedClient{
-// 		Cache:               NewMemoryCache(),
-// 		MarkCachedResponses: true,
-// 		Transport: http.Transport{
-// 			DialContext: func(_ context.Context, network, _ string) (net.Conn, error) {
-// 				return net.Dial(network, s.server.Listener.Addr().String())
-// 			},
-// 		},
-// 	}
+func TestStaleIfErrorResponseLifetime(t *testing.T) {
+	resetTest()
+	now := time.Now()
+	tmock := transportMock{
+		response: &http.Response{
+			Status:     http.StatusText(http.StatusOK),
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Date":          []string{now.Format(time.RFC1123)},
+				"Cache-Control": []string{"no-cache, stale-if-error=100"},
+			},
+			Body: ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
+		},
+		err: nil,
+	}
+	tp := &CachedClient{
+		Cache:               NewMemoryCache(),
+		MarkCachedResponses: true,
+		Transport:           &tmock,
+	}
 
-// 	// First time, response is cached on success
-// 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
-// 	resp, err := tp.Do(r)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	if resp == nil {
-// 		t.Fatal("resp is nil")
-// 	}
-// 	_, err = ioutil.ReadAll(resp.Body)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+	// First time, response is cached on success
+	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
+	resp, err := tp.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
+	_, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	// On failure, response is returned from the cache
-// 	tmock.response = nil
-// 	tmock.err = errors.New("some error")
-// 	resp, err = tp.Do(r)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	if resp == nil {
-// 		t.Fatal("resp is nil")
-// 	}
+	// On failure, response is returned from the cache
+	tmock.response = nil
+	tmock.err = errors.New("some error")
+	resp, err = tp.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
 
-// 	// If failure last more than max stale, error is returned
-// 	clock = &fakeClock{elapsed: 200 * time.Second}
-// 	_, err = tp.Do(r)
-// 	if err != tmock.err {
-// 		t.Fatalf("got err %v, want %v", err, tmock.err)
-// 	}
-// }
+	// If failure last more than max stale, error is returned
+	clock = &fakeClock{elapsed: 200 * time.Second}
+	_, err = tp.Do(r)
+	if err != tmock.err {
+		t.Fatalf("got err %v, want %v", err, tmock.err)
+	}
+}
 
-// This tests the fix for https://github.com/gregjones/httpcache/issues/74.
+// This tests the fix for https://github.com/lggomez/httpcache/issues/74.
 // Previously, after a stale response was used after encountering an error,
 // its StatusCode was being incorrectly replaced.
-// func TestStaleIfErrorKeepsStatus(t *testing.T) {
-// 	resetTest()
-// 	now := time.Now()
-// 	tmock := transportMock{
-// 		response: &http.Response{
-// 			Status:     http.StatusText(http.StatusNotFound),
-// 			StatusCode: http.StatusNotFound,
-// 			Header: http.Header{
-// 				"Date":          []string{now.Format(time.RFC1123)},
-// 				"Cache-Control": []string{"no-cache"},
-// 			},
-// 			Body: ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
-// 		},
-// 		err: nil,
-// 	}
-// 	tp := &CachedClient{
-// 		Cache:               NewMemoryCache(),
-// 		MarkCachedResponses: true,
-// 		Transport: http.Transport{
-// 			DialContext: func(_ context.Context, network, _ string) (net.Conn, error) {
-// 				return net.Dial(network, s.server.Listener.Addr().String())
-// 			},
-// 		},
-// 	}
+func TestStaleIfErrorKeepsStatus(t *testing.T) {
+	resetTest()
+	now := time.Now()
+	tmock := transportMock{
+		response: &http.Response{
+			Status:     http.StatusText(http.StatusNotFound),
+			StatusCode: http.StatusNotFound,
+			Header: http.Header{
+				"Date":          []string{now.Format(time.RFC1123)},
+				"Cache-Control": []string{"no-cache"},
+			},
+			Body: ioutil.NopCloser(bytes.NewBuffer([]byte("some data"))),
+		},
+		err: nil,
+	}
+	tp := &CachedClient{
+		Cache:               NewMemoryCache(),
+		MarkCachedResponses: true,
+		Transport:           &tmock,
+	}
 
-// 	// First time, response is cached on success
-// 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
-// 	r.Header.Set("Cache-Control", "stale-if-error")
-// 	resp, err := tp.Do(r)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	if resp == nil {
-// 		t.Fatal("resp is nil")
-// 	}
-// 	_, err = ioutil.ReadAll(resp.Body)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+	// First time, response is cached on success
+	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
+	r.Header.Set("Cache-Control", "stale-if-error")
+	resp, err := tp.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
+	_, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	// On failure, response is returned from the cache
-// 	tmock.response = nil
-// 	tmock.err = errors.New("some error")
-// 	resp, err = tp.Do(r)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	if resp == nil {
-// 		t.Fatal("resp is nil")
-// 	}
-// 	if resp.StatusCode != http.StatusNotFound {
-// 		t.Fatalf("Status wasn't 404: %d", resp.StatusCode)
-// 	}
-// }
+	// On failure, response is returned from the cache
+	tmock.response = nil
+	tmock.err = errors.New("some error")
+	resp, err = tp.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("resp is nil")
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("Status wasn't 404: %d", resp.StatusCode)
+	}
+}
 
 // Test that http.Client.Timeout is respected when cache transport is used.
 // That is so as long as request cancellation is propagated correctly.
