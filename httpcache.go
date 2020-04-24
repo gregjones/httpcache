@@ -90,25 +90,25 @@ type MemoryCache struct {
 }
 
 // Get returns the []byte representation of the response and true if present, false if not
-func (c *MemoryCache) Get(key string) (resp []byte, ok bool) {
-	c.mu.RLock()
-	resp, ok = c.items[key]
-	c.mu.RUnlock()
+func (mc *MemoryCache) Get(key string) (resp []byte, ok bool) {
+	mc.mu.RLock()
+	resp, ok = mc.items[key]
+	mc.mu.RUnlock()
 	return resp, ok
 }
 
 // Set saves response resp to the cache with key
-func (c *MemoryCache) Set(key string, resp []byte) {
-	c.mu.Lock()
-	c.items[key] = resp
-	c.mu.Unlock()
+func (mc *MemoryCache) Set(key string, resp []byte) {
+	mc.mu.Lock()
+	mc.items[key] = resp
+	mc.mu.Unlock()
 }
 
 // Delete removes key from the cache
-func (c *MemoryCache) Delete(key string) {
-	c.mu.Lock()
-	delete(c.items, key)
-	c.mu.Unlock()
+func (mc *MemoryCache) Delete(key string) {
+	mc.mu.Lock()
+	delete(mc.items, key)
+	mc.mu.Unlock()
 }
 
 // NewMemoryCache returns a new Cache that will store items in an in-memory map
@@ -141,8 +141,8 @@ func NewMemoryCachedClient(client *http.Client) Doer {
 	return cc
 }
 
-func (t *CachedClient) log(message string) {
-	if t.Debug {
+func (cc *CachedClient) log(message string) {
+	if cc.Debug {
 		println(message)
 	}
 }
@@ -167,35 +167,35 @@ func varyMatches(cachedResp *http.Response, req *http.Request) bool {
 // If there is a stale Response, then any validators it contains will be set on the new request
 // to give the server a chance to respond with NotModified. If this happens, then the cached Response
 // will be returned.
-func (t *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
+func (cc *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 	cacheKey := cacheKey(req)
 	cacheable := (req.Method == "GET" || req.Method == "HEAD") && req.Header.Get("range") == ""
 	var cachedResp *http.Response
 
 	// Cached response retrieval
 	if cacheable {
-		cachedResp, err = CachedResponse(t.Cache, req)
-		t.log(fmt.Sprintf("\n[httpcache](%p) cached get key %v: (err:%v, nil:%v)",
+		cachedResp, err = CachedResponse(cc.Cache, req)
+		cc.log(fmt.Sprintf("\n[httpcache](%p) cached get key %v: (err:%v, nil:%v)",
 			req,
 			cacheKey,
 			err,
 			cachedResp == nil))
 	} else {
 		// Need to invalidate an existing value
-		t.log(fmt.Sprintf("\n[httpcache](%p) evicting entry (reason: cacheable == false) for key %v", req, cacheKey))
-		t.Cache.Delete(cacheKey)
+		cc.log(fmt.Sprintf("\n[httpcache](%p) evicting entry (reason: cacheable == false) for key %v", req, cacheKey))
+		cc.Cache.Delete(cacheKey)
 	}
 
 	// Response/request validation and remote request
 	if cacheable && cachedResp != nil && err == nil {
-		if t.MarkCachedResponses {
+		if cc.MarkCachedResponses {
 			cachedResp.Header.Set(XFromCache, "1")
 		}
 
 		if varyMatches(cachedResp, req) {
 			// Can only use cached value if the new request doesn't Vary significantly
-			freshness := getFreshness(t, req, cachedResp.Header)
-			t.log(fmt.Sprintf("[httpcache](%p) varyMatches: true, freshness: %s, processing result", req, freshness))
+			freshness := cc.getFreshness(req, cachedResp.Header)
+			cc.log(fmt.Sprintf("[httpcache](%p) varyMatches: true, freshness: %s, processing result", req, freshness))
 
 			if freshness == fresh {
 				return cachedResp, nil
@@ -207,7 +207,7 @@ func (t *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 				etag := cachedResp.Header.Get("etag")
 				if etag != "" && req.Header.Get("etag") == "" {
 					req2 = cloneRequest(req)
-					t.log(fmt.Sprintf("[httpcache](%p) setting request if-none-match to %s from cached etag", req, etag))
+					cc.log(fmt.Sprintf("[httpcache](%p) setting request if-none-match to %s from cached etag", req, etag))
 					req2.Header.Set("if-none-match", etag)
 				}
 				lastModified := cachedResp.Header.Get("last-modified")
@@ -215,18 +215,18 @@ func (t *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 					if req2 == nil {
 						req2 = cloneRequest(req)
 					}
-					t.log(fmt.Sprintf("[httpcache](%p) setting request if-modified-since to %s from cached last-modified", req, lastModified))
+					cc.log(fmt.Sprintf("[httpcache](%p) setting request if-modified-since to %s from cached last-modified", req, lastModified))
 					req2.Header.Set("if-modified-since", lastModified)
 				}
 				if req2 != nil {
-					t.log(fmt.Sprintf("[httpcache](%p) overriding request with updated validator headers", req))
+					cc.log(fmt.Sprintf("[httpcache](%p) overriding request with updated validator headers", req))
 					req = req2
 				}
 			}
 		}
 
-		t.log(fmt.Sprintf("[httpcache](%p) cache miss or stale entry. executing remote request", req))
-		resp, err = t.Transport.RoundTrip(req)
+		cc.log(fmt.Sprintf("[httpcache](%p) cache miss or stale entry. executing remote request", req))
+		resp, err = cc.Transport.RoundTrip(req)
 		if err == nil && req.Method == "GET" && resp.StatusCode == http.StatusNotModified {
 			// Replace the 304 response with the one from cache, but update with some new headers
 			endToEndHeaders := getEndToEndHeaders(resp.Header)
@@ -235,7 +235,7 @@ func (t *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 			}
 			resp.Body.Close()
 			resp = cachedResp
-			t.log(fmt.Sprintf("[httpcache](%p) 304 server response obtained. using local cache response", req))
+			cc.log(fmt.Sprintf("[httpcache](%p) 304 server response obtained. using local cache response", req))
 		} else if (err != nil || (cachedResp != nil && resp.StatusCode >= 500)) &&
 			req.Method == "GET" && canStaleOnError(cachedResp.Header, req.Header) {
 			// In case of transport failure and stale-if-error activated, returns cached content
@@ -243,26 +243,26 @@ func (t *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 			if resp != nil && resp.Body != nil {
 				resp.Body.Close()
 			}
-			t.log(fmt.Sprintf("[httpcache](%p) transport/upstream error with stale-if-error. using local cache response", req))
+			cc.log(fmt.Sprintf("[httpcache](%p) transport/upstream error with stale-if-error. using local cache response", req))
 			return cachedResp, nil
 		} else {
 			if err != nil || resp.StatusCode != http.StatusOK {
-				t.log(fmt.Sprintf("[httpcache](%p) evicting entry (reason: request/upstream error) for key %v", req, cacheKey))
-				t.Cache.Delete(cacheKey)
+				cc.log(fmt.Sprintf("[httpcache](%p) evicting entry (reason: request/upstream error) for key %v", req, cacheKey))
+				cc.Cache.Delete(cacheKey)
 			}
 			if err != nil {
-				t.log(fmt.Sprintf("[httpcache](%p) transport/upstream error. returning nil response (%s)", req, err.Error()))
+				cc.log(fmt.Sprintf("[httpcache](%p) transport/upstream error. returning nil response (%s)", req, err.Error()))
 				return nil, err
 			}
 		}
 	} else {
 		reqCacheControl := parseCacheControl(req.Header)
 		if _, ok := reqCacheControl["only-if-cached"]; ok {
-			t.log(fmt.Sprintf("[httpcache](%p) non-cacheable or entry error detected with only-if-cached request. returning timeout", req))
+			cc.log(fmt.Sprintf("[httpcache](%p) non-cacheable or entry error detected with only-if-cached request. returning timeout", req))
 			resp = newGatewayTimeoutResponse(req)
 		} else {
-			t.log(fmt.Sprintf("[httpcache](%p) non-cacheable or entry error detected. executing remote request", req))
-			resp, err = t.Transport.RoundTrip(req)
+			cc.log(fmt.Sprintf("[httpcache](%p) non-cacheable or entry error detected. executing remote request", req))
+			resp, err = cc.Transport.RoundTrip(req)
 			if err != nil {
 				return nil, err
 			}
@@ -289,21 +289,21 @@ func (t *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 					resp.Body = ioutil.NopCloser(r)
 					respBytes, err := httputil.DumpResponse(&resp, true)
 					if err == nil {
-						t.log(fmt.Sprintf("[httpcache](%p) insert entry (source: cachingReadCloser.OnEOF) for key %v", req, cacheKey))
-						t.Cache.Set(cacheKey, respBytes)
+						cc.log(fmt.Sprintf("[httpcache](%p) insert entry (source: cachingReadCloser.OnEOF) for key %v", req, cacheKey))
+						cc.Cache.Set(cacheKey, respBytes)
 					}
 				},
 			}
 		default:
 			respBytes, err := httputil.DumpResponse(resp, true)
 			if err == nil {
-				t.log(fmt.Sprintf("[httpcache](%p) insert entry (source: DumpResponse) for key %v", req, cacheKey))
-				t.Cache.Set(cacheKey, respBytes)
+				cc.log(fmt.Sprintf("[httpcache](%p) insert entry (source: DumpResponse) for key %v", req, cacheKey))
+				cc.Cache.Set(cacheKey, respBytes)
 			}
 		}
 	} else {
-		t.log(fmt.Sprintf("[httpcache](%p) evicting entry (reason: (cacheable && canStore) == false) for key %v", req, cacheKey))
-		t.Cache.Delete(cacheKey)
+		cc.log(fmt.Sprintf("[httpcache](%p) evicting entry (reason: (cacheable && canStore) == false) for key %v", req, cacheKey))
+		cc.Cache.Delete(cacheKey)
 	}
 
 	return resp, nil
@@ -344,26 +344,26 @@ var clock timer = &realClock{}
 //
 // Because this is only a private cache, 'public' and 'private' in cache-control aren't
 // signficant. Similarly, smax-age isn't used.
-func getFreshness(c *CachedClient, req *http.Request, respHeaders http.Header) (freshness entryFreshness) {
+func (cc *CachedClient) getFreshness(req *http.Request, respHeaders http.Header) (freshness entryFreshness) {
 	reqHeaders := req.Header
 	respCacheControl := parseCacheControl(respHeaders)
 	reqCacheControl := parseCacheControl(reqHeaders)
 	if _, ok := reqCacheControl["no-cache"]; ok {
-		c.log(fmt.Sprintf("[httpcache](%p) request no-cache header found. returning transparent freshness", req))
+		cc.log(fmt.Sprintf("[httpcache](%p) request no-cache header found. returning transparent freshness", req))
 		return transparent
 	}
 	if _, ok := respCacheControl["no-cache"]; ok {
-		c.log(fmt.Sprintf("[httpcache](%p) response no-cache header found. returning stale freshness", req))
+		cc.log(fmt.Sprintf("[httpcache](%p) response no-cache header found. returning stale freshness", req))
 		return stale
 	}
 	if _, ok := reqCacheControl["only-if-cached"]; ok {
-		c.log(fmt.Sprintf("[httpcache](%p) request only-if-cached header found. returning fresh freshness", req))
+		cc.log(fmt.Sprintf("[httpcache](%p) request only-if-cached header found. returning fresh freshness", req))
 		return fresh
 	}
 
 	date, err := Date(respHeaders)
 	if err != nil {
-		c.log(fmt.Sprintf("[httpcache](%p) response date get error. returning stale freshness (%v)", req, err.Error()))
+		cc.log(fmt.Sprintf("[httpcache](%p) response date get error. returning stale freshness (%v)", req, err.Error()))
 		return stale
 	}
 	currentAge := clock.since(date)
@@ -415,7 +415,7 @@ func getFreshness(c *CachedClient, req *http.Request, respHeaders http.Header) (
 		// but that seems like a  hassle, and is it actually useful? If so, then there needs to be a different
 		// return-value available here.
 		if maxstale == "" {
-			c.log(fmt.Sprintf("[httpcache](%p) request max-stale header found. returning fresh freshness", req))
+			cc.log(fmt.Sprintf("[httpcache](%p) request max-stale header found. returning fresh freshness", req))
 			return fresh
 		}
 		maxstaleDuration, err := time.ParseDuration(maxstale + "s")
@@ -425,11 +425,11 @@ func getFreshness(c *CachedClient, req *http.Request, respHeaders http.Header) (
 	}
 
 	if lifetime > currentAge {
-		c.log(fmt.Sprintf("[httpcache](%p) lifetime > currentAge. returning fresh freshness (%s, %s)", req, lifetime, currentAge))
+		cc.log(fmt.Sprintf("[httpcache](%p) lifetime > currentAge. returning fresh freshness (%s, %s)", req, lifetime, currentAge))
 		return fresh
 	}
 
-	c.log(fmt.Sprintf("[httpcache](%p) cannot infer freshness. fallback to stale freshness (lifetime: %s <= currentAge: %s)", req, lifetime, currentAge))
+	cc.log(fmt.Sprintf("[httpcache](%p) cannot infer freshness. fallback to stale freshness (lifetime: %s <= currentAge: %s)", req, lifetime, currentAge))
 	return stale
 }
 

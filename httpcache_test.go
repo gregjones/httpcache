@@ -955,7 +955,10 @@ func TestNoCacheRequestExpiration(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Cache-Control", "no-cache")
-	if getFreshness(respHeaders, reqHeaders) != transparent {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != transparent {
 		t.Fatal("freshness isn't transparent")
 	}
 }
@@ -967,7 +970,10 @@ func TestNoCacheResponseExpiration(t *testing.T) {
 	respHeaders.Set("Expires", "Wed, 19 Apr 3000 11:43:00 GMT")
 
 	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, reqHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -980,7 +986,10 @@ func TestReqMustRevalidate(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Cache-Control", "must-revalidate")
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -990,8 +999,10 @@ func TestRespMustRevalidate(t *testing.T) {
 	respHeaders := http.Header{}
 	respHeaders.Set("Cache-Control", "must-revalidate")
 
-	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	req := &http.Request{Header: http.Header{}}
+	cc := CachedClient{Debug: true}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1003,13 +1014,15 @@ func TestFreshExpiration(t *testing.T) {
 	respHeaders.Set("date", now.Format(time.RFC1123))
 	respHeaders.Set("expires", now.Add(time.Duration(2)*time.Second).Format(time.RFC1123))
 
-	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: http.Header{}}
+
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 3 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1022,12 +1035,15 @@ func TestMaxAge(t *testing.T) {
 	respHeaders.Set("cache-control", "max-age=2")
 
 	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 3 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1040,7 +1056,10 @@ func TestMaxAgeZero(t *testing.T) {
 	respHeaders.Set("cache-control", "max-age=0")
 
 	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1054,7 +1073,10 @@ func TestBothMaxAge(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-age=0")
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1068,13 +1090,19 @@ func TestMinFreshWithExpires(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "min-fresh=1")
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	reqHeaders = http.Header{}
 	reqHeaders.Set("cache-control", "min-fresh=2")
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc = CachedClient{Debug: true}
+	req = &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1088,13 +1116,17 @@ func TestEmptyMaxStale(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-stale")
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
 	clock = &fakeClock{elapsed: 10 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 60 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 }
@@ -1108,18 +1140,21 @@ func TestMaxStaleValue(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-stale=20")
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
 	clock = &fakeClock{elapsed: 5 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 15 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 30 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
