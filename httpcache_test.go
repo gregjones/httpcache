@@ -2,6 +2,7 @@ package httpcache
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -157,6 +158,15 @@ func setup() {
 				w.Write([]byte{0})
 			}
 		}
+	}))
+
+	mux.HandleFunc("/json", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Header().Set("Content-Type", "application/json")
+		// This will force using bufio.Read() instead of chunkedReader.Read()
+		// to miss the EOF.
+		w.Header().Set("Transfer-encoding", "identity")
+		json.NewEncoder(w).Encode(map[string]string{"k": "v"})
 	}))
 }
 
@@ -394,6 +404,43 @@ func TestCacheOnlyIfBodyRead(t *testing.T) {
 		defer resp.Body.Close()
 		if resp.Header.Get(XFromCache) != "" {
 			t.Fatalf("XFromCache header isn't blank")
+		}
+	}
+}
+
+func TestCacheOnJsonBodyRead(t *testing.T) {
+	resetTest()
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var r json.RawMessage
+		err = json.NewDecoder(resp.Body).Decode(&r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatalf("XFromCache header isn't blank")
+		}
+	}
+	{
+		req, err := http.NewRequest("GET", s.server.URL+"/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf("XFromCache header isn't set")
 		}
 	}
 }
