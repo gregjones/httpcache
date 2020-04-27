@@ -1438,7 +1438,7 @@ func TestStaleIfErrorResponseLifetime(t *testing.T) {
 	}
 }
 
-// This tests the fix for https://github.com/lggomez/httpcache/issues/74.
+// This tests the fix for https://github.com/gregjones/httpcache/issues/74.
 // Previously, after a stale response was used after encountering an error,
 // its StatusCode was being incorrectly replaced.
 func TestStaleIfErrorKeepsStatus(t *testing.T) {
