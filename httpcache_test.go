@@ -15,10 +15,9 @@ import (
 )
 
 var s struct {
-	server    *httptest.Server
-	client    http.Client
-	transport *Transport
-	done      chan struct{} // Closed to unlock infinite handlers.
+	server *httptest.Server
+	client *CachedClient
+	done   chan struct{} // Closed to unlock infinite handlers.
 }
 
 type fakeClock struct {
@@ -38,10 +37,7 @@ func TestMain(m *testing.M) {
 }
 
 func setup() {
-	tp := NewMemoryCacheTransport()
-	client := http.Client{Transport: tp}
-	s.transport = tp
-	s.client = client
+	s.client = &CachedClient{Cache: NewMemoryCache(), MarkCachedResponses: true, Transport: &http.Transport{}}
 	s.done = make(chan struct{})
 
 	mux := http.NewServeMux()
@@ -166,7 +162,7 @@ func teardown() {
 }
 
 func resetTest() {
-	s.transport.Cache = NewMemoryCache()
+	s.client.Cache = NewMemoryCache()
 	clock = &realClock{}
 }
 
@@ -720,7 +716,7 @@ func TestGetWithDoubleVary(t *testing.T) {
 func TestGetWith2VaryHeaders(t *testing.T) {
 	resetTest()
 	// Tests that multiple Vary headers' comma-separated lists are
-	// merged. See https://github.com/lggomez/httpcache/issues/27.
+	// merged. See https://github.com/gregjones/httpcache/issues/27.
 	const (
 		accept         = "text/plain"
 		acceptLanguage = "da, en-gb;q=0.8, en;q=0.7"
@@ -884,7 +880,7 @@ func TestUpdateFields(t *testing.T) {
 	}
 }
 
-// This tests the fix for https://github.com/lggomez/httpcache/issues/74.
+// This tests the fix for https://github.com/gregjones/httpcache/issues/74.
 // Previously, after validating a cached response, its StatusCode
 // was incorrectly being replaced.
 func TestCachedErrorsKeepStatus(t *testing.T) {
@@ -957,7 +953,10 @@ func TestNoCacheRequestExpiration(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Cache-Control", "no-cache")
-	if getFreshness(respHeaders, reqHeaders) != transparent {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != transparent {
 		t.Fatal("freshness isn't transparent")
 	}
 }
@@ -969,7 +968,10 @@ func TestNoCacheResponseExpiration(t *testing.T) {
 	respHeaders.Set("Expires", "Wed, 19 Apr 3000 11:43:00 GMT")
 
 	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, reqHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -982,7 +984,10 @@ func TestReqMustRevalidate(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Cache-Control", "must-revalidate")
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -992,8 +997,10 @@ func TestRespMustRevalidate(t *testing.T) {
 	respHeaders := http.Header{}
 	respHeaders.Set("Cache-Control", "must-revalidate")
 
-	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	req := &http.Request{Header: http.Header{}}
+	cc := CachedClient{Debug: true}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1005,13 +1012,15 @@ func TestFreshExpiration(t *testing.T) {
 	respHeaders.Set("date", now.Format(time.RFC1123))
 	respHeaders.Set("expires", now.Add(time.Duration(2)*time.Second).Format(time.RFC1123))
 
-	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: http.Header{}}
+
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 3 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1024,12 +1033,15 @@ func TestMaxAge(t *testing.T) {
 	respHeaders.Set("cache-control", "max-age=2")
 
 	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 3 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1042,7 +1054,10 @@ func TestMaxAgeZero(t *testing.T) {
 	respHeaders.Set("cache-control", "max-age=0")
 
 	reqHeaders := http.Header{}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1056,7 +1071,10 @@ func TestBothMaxAge(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-age=0")
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1070,13 +1088,19 @@ func TestMinFreshWithExpires(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "min-fresh=1")
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	reqHeaders = http.Header{}
 	reqHeaders.Set("cache-control", "min-fresh=2")
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	cc = CachedClient{Debug: true}
+	req = &http.Request{Header: reqHeaders}
+
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1090,13 +1114,17 @@ func TestEmptyMaxStale(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-stale")
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
 	clock = &fakeClock{elapsed: 10 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 60 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 }
@@ -1110,18 +1138,21 @@ func TestMaxStaleValue(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-stale=20")
+	cc := CachedClient{Debug: true}
+	req := &http.Request{Header: reqHeaders}
+
 	clock = &fakeClock{elapsed: 5 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 15 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != fresh {
+	if cc.getFreshness(req, respHeaders) != fresh {
 		t.Fatal("freshness isn't fresh")
 	}
 
 	clock = &fakeClock{elapsed: 30 * time.Second}
-	if getFreshness(respHeaders, reqHeaders) != stale {
+	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
 	}
 }
@@ -1207,13 +1238,16 @@ func TestStaleIfErrorRequest(t *testing.T) {
 		},
 		err: nil,
 	}
-	tp := NewMemoryCacheTransport()
-	tp.Transport = &tmock
+	tp := &CachedClient{
+		Cache:               NewMemoryCache(),
+		MarkCachedResponses: true,
+		Transport:           &tmock,
+	}
 
 	// First time, response is cached on success
 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
 	r.Header.Set("Cache-Control", "stale-if-error")
-	resp, err := tp.RoundTrip(r)
+	resp, err := tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1228,7 +1262,7 @@ func TestStaleIfErrorRequest(t *testing.T) {
 	// On failure, response is returned from the cache
 	tmock.response = nil
 	tmock.err = errors.New("some error")
-	resp, err = tp.RoundTrip(r)
+	resp, err = tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1252,13 +1286,16 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 		},
 		err: nil,
 	}
-	tp := NewMemoryCacheTransport()
-	tp.Transport = &tmock
+	tp := &CachedClient{
+		Cache:               NewMemoryCache(),
+		MarkCachedResponses: true,
+		Transport:           &tmock,
+	}
 
 	// First time, response is cached on success
 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
 	r.Header.Set("Cache-Control", "stale-if-error=100")
-	resp, err := tp.RoundTrip(r)
+	resp, err := tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1273,7 +1310,7 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 	// On failure, response is returned from the cache
 	tmock.response = nil
 	tmock.err = errors.New("some error")
-	resp, err = tp.RoundTrip(r)
+	resp, err = tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1284,7 +1321,7 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 	// Same for http errors
 	tmock.response = &http.Response{StatusCode: http.StatusInternalServerError}
 	tmock.err = nil
-	resp, err = tp.RoundTrip(r)
+	resp, err = tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1294,7 +1331,7 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 
 	// If failure last more than max stale, error is returned
 	clock = &fakeClock{elapsed: 200 * time.Second}
-	_, err = tp.RoundTrip(r)
+	_, err = tp.Do(r)
 	if err != tmock.err {
 		t.Fatalf("got err %v, want %v", err, tmock.err)
 	}
@@ -1315,12 +1352,15 @@ func TestStaleIfErrorResponse(t *testing.T) {
 		},
 		err: nil,
 	}
-	tp := NewMemoryCacheTransport()
-	tp.Transport = &tmock
+	tp := &CachedClient{
+		Cache:               NewMemoryCache(),
+		MarkCachedResponses: true,
+		Transport:           &tmock,
+	}
 
 	// First time, response is cached on success
 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
-	resp, err := tp.RoundTrip(r)
+	resp, err := tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1335,7 +1375,7 @@ func TestStaleIfErrorResponse(t *testing.T) {
 	// On failure, response is returned from the cache
 	tmock.response = nil
 	tmock.err = errors.New("some error")
-	resp, err = tp.RoundTrip(r)
+	resp, err = tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1359,12 +1399,15 @@ func TestStaleIfErrorResponseLifetime(t *testing.T) {
 		},
 		err: nil,
 	}
-	tp := NewMemoryCacheTransport()
-	tp.Transport = &tmock
+	tp := &CachedClient{
+		Cache:               NewMemoryCache(),
+		MarkCachedResponses: true,
+		Transport:           &tmock,
+	}
 
 	// First time, response is cached on success
 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
-	resp, err := tp.RoundTrip(r)
+	resp, err := tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1379,7 +1422,7 @@ func TestStaleIfErrorResponseLifetime(t *testing.T) {
 	// On failure, response is returned from the cache
 	tmock.response = nil
 	tmock.err = errors.New("some error")
-	resp, err = tp.RoundTrip(r)
+	resp, err = tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1389,7 +1432,7 @@ func TestStaleIfErrorResponseLifetime(t *testing.T) {
 
 	// If failure last more than max stale, error is returned
 	clock = &fakeClock{elapsed: 200 * time.Second}
-	_, err = tp.RoundTrip(r)
+	_, err = tp.Do(r)
 	if err != tmock.err {
 		t.Fatalf("got err %v, want %v", err, tmock.err)
 	}
@@ -1413,13 +1456,16 @@ func TestStaleIfErrorKeepsStatus(t *testing.T) {
 		},
 		err: nil,
 	}
-	tp := NewMemoryCacheTransport()
-	tp.Transport = &tmock
+	tp := &CachedClient{
+		Cache:               NewMemoryCache(),
+		MarkCachedResponses: true,
+		Transport:           &tmock,
+	}
 
 	// First time, response is cached on success
 	r, _ := http.NewRequest("GET", "http://somewhere.com/", nil)
 	r.Header.Set("Cache-Control", "stale-if-error")
-	resp, err := tp.RoundTrip(r)
+	resp, err := tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1434,7 +1480,7 @@ func TestStaleIfErrorKeepsStatus(t *testing.T) {
 	// On failure, response is returned from the cache
 	tmock.response = nil
 	tmock.err = errors.New("some error")
-	resp, err = tp.RoundTrip(r)
+	resp, err = tp.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1457,8 +1503,8 @@ func TestClientTimeout(t *testing.T) {
 	}
 	resetTest()
 	client := &http.Client{
-		Transport: NewMemoryCacheTransport(),
-		Timeout:   time.Second,
+		//Transport: NewMemoryCachedClient(),
+		Timeout: time.Second,
 	}
 	started := time.Now()
 	resp, err := client.Get(s.server.URL + "/3seconds")
