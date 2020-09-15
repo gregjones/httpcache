@@ -37,7 +37,7 @@ func TestMain(m *testing.M) {
 }
 
 func setup() {
-	s.client = &CachedClient{Cache: NewMemoryCache(), MarkCachedResponses: true, Transport: &http.Transport{}}
+	s.client = &CachedClient{Cache: NewMemoryCache(), Options: CacheOptions{MarkCachedResponses: true}, Transport: &http.Transport{}}
 	s.done = make(chan struct{})
 
 	mux := http.NewServeMux()
@@ -953,7 +953,7 @@ func TestNoCacheRequestExpiration(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Cache-Control", "no-cache")
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: reqHeaders}
 
 	if cc.getFreshness(req, respHeaders) != transparent {
@@ -968,7 +968,7 @@ func TestNoCacheResponseExpiration(t *testing.T) {
 	respHeaders.Set("Expires", "Wed, 19 Apr 3000 11:43:00 GMT")
 
 	reqHeaders := http.Header{}
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: reqHeaders}
 
 	if cc.getFreshness(req, reqHeaders) != stale {
@@ -984,7 +984,7 @@ func TestReqMustRevalidate(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Cache-Control", "must-revalidate")
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: reqHeaders}
 
 	if cc.getFreshness(req, respHeaders) != stale {
@@ -998,7 +998,7 @@ func TestRespMustRevalidate(t *testing.T) {
 	respHeaders.Set("Cache-Control", "must-revalidate")
 
 	req := &http.Request{Header: http.Header{}}
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 
 	if cc.getFreshness(req, respHeaders) != stale {
 		t.Fatal("freshness isn't stale")
@@ -1012,7 +1012,7 @@ func TestFreshExpiration(t *testing.T) {
 	respHeaders.Set("date", now.Format(time.RFC1123))
 	respHeaders.Set("expires", now.Add(time.Duration(2)*time.Second).Format(time.RFC1123))
 
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: http.Header{}}
 
 	if cc.getFreshness(req, respHeaders) != fresh {
@@ -1033,7 +1033,7 @@ func TestMaxAge(t *testing.T) {
 	respHeaders.Set("cache-control", "max-age=2")
 
 	reqHeaders := http.Header{}
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: reqHeaders}
 
 	if cc.getFreshness(req, respHeaders) != fresh {
@@ -1054,7 +1054,7 @@ func TestMaxAgeZero(t *testing.T) {
 	respHeaders.Set("cache-control", "max-age=0")
 
 	reqHeaders := http.Header{}
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: reqHeaders}
 
 	if cc.getFreshness(req, respHeaders) != stale {
@@ -1071,7 +1071,7 @@ func TestBothMaxAge(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-age=0")
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: reqHeaders}
 
 	if cc.getFreshness(req, respHeaders) != stale {
@@ -1088,7 +1088,7 @@ func TestMinFreshWithExpires(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "min-fresh=1")
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: reqHeaders}
 
 	if cc.getFreshness(req, respHeaders) != fresh {
@@ -1097,7 +1097,7 @@ func TestMinFreshWithExpires(t *testing.T) {
 
 	reqHeaders = http.Header{}
 	reqHeaders.Set("cache-control", "min-fresh=2")
-	cc = CachedClient{Debug: true}
+	cc = CachedClient{Options: CacheOptions{Debug: true}}
 	req = &http.Request{Header: reqHeaders}
 
 	if cc.getFreshness(req, respHeaders) != stale {
@@ -1114,7 +1114,7 @@ func TestEmptyMaxStale(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-stale")
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: reqHeaders}
 
 	clock = &fakeClock{elapsed: 10 * time.Second}
@@ -1138,7 +1138,7 @@ func TestMaxStaleValue(t *testing.T) {
 
 	reqHeaders := http.Header{}
 	reqHeaders.Set("cache-control", "max-stale=20")
-	cc := CachedClient{Debug: true}
+	cc := CachedClient{Options: CacheOptions{Debug: true}}
 	req := &http.Request{Header: reqHeaders}
 
 	clock = &fakeClock{elapsed: 5 * time.Second}
@@ -1239,9 +1239,9 @@ func TestStaleIfErrorRequest(t *testing.T) {
 		err: nil,
 	}
 	tp := &CachedClient{
-		Cache:               NewMemoryCache(),
-		MarkCachedResponses: true,
-		Transport:           &tmock,
+		Cache:     NewMemoryCache(),
+		Options:   CacheOptions{MarkCachedResponses: true},
+		Transport: &tmock,
 	}
 
 	// First time, response is cached on success
@@ -1287,9 +1287,9 @@ func TestStaleIfErrorRequestLifetime(t *testing.T) {
 		err: nil,
 	}
 	tp := &CachedClient{
-		Cache:               NewMemoryCache(),
-		MarkCachedResponses: true,
-		Transport:           &tmock,
+		Cache:     NewMemoryCache(),
+		Options:   CacheOptions{MarkCachedResponses: true},
+		Transport: &tmock,
 	}
 
 	// First time, response is cached on success
@@ -1353,9 +1353,9 @@ func TestStaleIfErrorResponse(t *testing.T) {
 		err: nil,
 	}
 	tp := &CachedClient{
-		Cache:               NewMemoryCache(),
-		MarkCachedResponses: true,
-		Transport:           &tmock,
+		Cache:     NewMemoryCache(),
+		Options:   CacheOptions{MarkCachedResponses: true},
+		Transport: &tmock,
 	}
 
 	// First time, response is cached on success
@@ -1400,9 +1400,9 @@ func TestStaleIfErrorResponseLifetime(t *testing.T) {
 		err: nil,
 	}
 	tp := &CachedClient{
-		Cache:               NewMemoryCache(),
-		MarkCachedResponses: true,
-		Transport:           &tmock,
+		Cache:     NewMemoryCache(),
+		Options:   CacheOptions{MarkCachedResponses: true},
+		Transport: &tmock,
 	}
 
 	// First time, response is cached on success
@@ -1457,9 +1457,9 @@ func TestStaleIfErrorKeepsStatus(t *testing.T) {
 		err: nil,
 	}
 	tp := &CachedClient{
-		Cache:               NewMemoryCache(),
-		MarkCachedResponses: true,
-		Transport:           &tmock,
+		Cache:     NewMemoryCache(),
+		Options:   CacheOptions{MarkCachedResponses: true},
+		Transport: &tmock,
 	}
 
 	// First time, response is cached on success

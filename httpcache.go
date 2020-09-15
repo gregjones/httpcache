@@ -1,5 +1,5 @@
-// Package httpcache provides a http.RoundTripper implementation that works as a
-// mostly RFC-compliant cache for http responses.
+// Package httpcache provides a http.RoundTripper wrapper implementation that works as a
+// mostly RFC-compliant cached client for http responses.
 //
 // It is only suitable for use as a 'private' cache (i.e. for a web-browser or an API-client
 // and not for a shared proxy).
@@ -38,13 +38,13 @@ type Cache interface {
 	// Get returns the []byte representation of a cached response and a bool
 	// set to true if the value isn't empty
 	Get(key string) (responseBytes []byte, ok bool)
-	// Set stores the []byte representation of a response against a key
-	Set(key string, responseBytes []byte)
+	// Set stores the []byte representation of a response for a given key, with a TTL for supporting implementations
+	Set(key string, responseBytes []byte, ttl int)
 	// Delete removes the value associated with the key
 	Delete(key string)
 }
 
-// A Doer interface abstracts the http request execution from the client implementation
+// A Doer interface abstracts the http.Client request execution from the client implementation
 type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
@@ -83,7 +83,7 @@ func CachedResponse(c Cache, req *http.Request) (resp *http.Response, err error)
 	return http.ReadResponse(bufio.NewReader(b), req)
 }
 
-// MemoryCache is an implemtation of Cache that stores responses in an in-memory map.
+// MemoryCache is an implementation of Cache that stores responses in an in-memory map.
 type MemoryCache struct {
 	mu    sync.RWMutex
 	items map[string][]byte
@@ -98,7 +98,7 @@ func (mc *MemoryCache) Get(key string) (resp []byte, ok bool) {
 }
 
 // Set saves response resp to the cache with key
-func (mc *MemoryCache) Set(key string, resp []byte) {
+func (mc *MemoryCache) Set(key string, resp []byte, ttl int) {
 	mc.mu.Lock()
 	mc.items[key] = resp
 	mc.mu.Unlock()
@@ -117,32 +117,40 @@ func NewMemoryCache() *MemoryCache {
 	return c
 }
 
+type CacheOptions struct {
+	TTL int
+	// If true, responses returned from the cache will be given an extra header, X-From-Cache
+	MarkCachedResponses bool
+	Debug               bool
+}
+
+type ClientOptions struct {
+}
+
 // CachedClient is an implementation of http.RoundTripper that will return values from a cache
 // where possible (avoiding a network request) and will additionally add validators (etag/if-modified-since)
 // to repeated requests allowing servers to return 304 / Not Modified
 type CachedClient struct {
 	Transport http.RoundTripper
 	Cache     Cache
-	// If true, responses returned from the cache will be given an extra header, X-From-Cache
-	MarkCachedResponses bool
-	Debug               bool
+	Options   CacheOptions
 }
 
 // NewCachedClient returns a new Transport with the
 // provided Cache implementation and MarkCachedResponses set to true
-func NewCachedClient(c Cache, client *http.Client, markCached bool, debug bool) Doer {
-	return &CachedClient{Cache: c, Transport: client.Transport, MarkCachedResponses: markCached, Debug: debug}
+func NewCachedClient(client *http.Client, c Cache, options CacheOptions) Doer {
+	return &CachedClient{Cache: c, Transport: client.Transport, Options: options}
 }
 
-// NewMemoryCachedClient returns a new Transport using the in-memory cache implementation
-func NewMemoryCachedClient(client *http.Client) Doer {
+// NewMemoryCachedClient returns a new Transport using the in-memory map cache implementation
+func NewMapCachedClient(client *http.Client) Doer {
 	c := NewMemoryCache()
-	cc := NewCachedClient(c, client, true, false)
+	cc := NewCachedClient(client, c, CacheOptions{})
 	return cc
 }
 
 func (cc *CachedClient) log(message string) {
-	if cc.Debug {
+	if cc.Options.Debug {
 		println(message)
 	}
 }
@@ -188,7 +196,7 @@ func (cc *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 
 	// Response/request validation and remote request
 	if cacheable && cachedResp != nil && err == nil {
-		if cc.MarkCachedResponses {
+		if cc.Options.MarkCachedResponses {
 			cachedResp.Header.Set(XFromCache, "1")
 		}
 
@@ -290,7 +298,7 @@ func (cc *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 					respBytes, err := httputil.DumpResponse(&resp, true)
 					if err == nil {
 						cc.log(fmt.Sprintf("[httpcache](%p) insert entry (source: cachingReadCloser.OnEOF) for key %v", req, cacheKey))
-						cc.Cache.Set(cacheKey, respBytes)
+						cc.Cache.Set(cacheKey, respBytes, cc.Options.TTL)
 					}
 				},
 			}
@@ -298,7 +306,7 @@ func (cc *CachedClient) Do(req *http.Request) (resp *http.Response, err error) {
 			respBytes, err := httputil.DumpResponse(resp, true)
 			if err == nil {
 				cc.log(fmt.Sprintf("[httpcache](%p) insert entry (source: DumpResponse) for key %v", req, cacheKey))
-				cc.Cache.Set(cacheKey, respBytes)
+				cc.Cache.Set(cacheKey, respBytes, cc.Options.TTL)
 			}
 		}
 	} else {
