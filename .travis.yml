@@ -1,7 +1,4 @@
 sudo: false
-arch:
-    - amd64
-    - ppc64le
 language: go
 matrix:
   allow_failures:
@@ -12,6 +9,14 @@ matrix:
     - go: 1.11.x
       env: GOFMT=1
     - go: master
+# adding code to run on power system    
+    - go: 1.10.x
+      arch: ppc64le
+    - go: 1.11.x
+      env: GOFMT=1
+      arch: ppc64le
+    - go: master
+      arch: ppc64le
 install:
   - # Do nothing. This is needed to prevent default install action "go get -t -v ./..." from happening here (we want it to happen inside script step).
 script:
