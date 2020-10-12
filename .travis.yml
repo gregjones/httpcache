@@ -10,8 +10,7 @@ matrix:
       env: GOFMT=1
     - go: master
 # adding code to run on power system    
-    - go: 1.10.x
-      arch: ppc64le
+  
     - go: 1.11.x
       env: GOFMT=1
       arch: ppc64le
