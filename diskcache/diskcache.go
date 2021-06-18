@@ -7,8 +7,11 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
-	"github.com/peterbourgon/diskv"
 	"io"
+
+	"github.com/peterbourgon/diskv"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Cache is an implementation of httpcache.Cache that supplements the in-memory map with persistent storage
@@ -29,7 +32,9 @@ func (c *Cache) Get(key string) (resp []byte, ok bool) {
 // Set saves a response to the cache as key
 func (c *Cache) Set(key string, resp []byte) {
 	key = keyToFilename(key)
-	c.d.WriteStream(key, bytes.NewReader(resp), true)
+	if err := c.d.WriteStream(key, bytes.NewReader(resp), true); err != nil {
+		logrus.WithError(err).WithField("key", key).Error("failed to write cache key to disk")
+	}
 }
 
 // Delete removes the response with key from the cache
