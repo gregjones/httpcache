@@ -564,6 +564,9 @@ func TestGetWithEtag(t *testing.T) {
 		if resp.Header.Get(XFromCache) != "1" {
 			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
 		}
+		if resp.Header.Get(XRevalidated) != "1" {
+			t.Fatalf(`XRevalidated isn't "1": %v`, resp.Header.Get(XRevalidated))
+		}
 		// additional assertions to verify that 304 response is converted properly
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("response status code isn't 200 OK: %v", resp.StatusCode)
