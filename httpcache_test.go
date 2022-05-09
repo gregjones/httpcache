@@ -14,6 +14,10 @@ import (
 	"time"
 )
 
+var (
+	testContextCache = flag.Bool("test-context-cache", false, "if true, tests the functionality of the ContextCache property")
+)
+
 var s struct {
 	server    *httptest.Server
 	client    http.Client
@@ -167,6 +171,11 @@ func teardown() {
 
 func resetTest() {
 	s.transport.Cache = NewMemoryCache()
+	if *testContextCache {
+		s.transport.ContextCache = cacheAsContextCache{s.transport.Cache}
+	} else {
+		s.transport.ContextCache = nil
+	}
 	clock = &realClock{}
 }
 
@@ -223,8 +232,8 @@ func TestCacheableMethod(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
 		}
-		if resp.Header.Get(XFromCache) != "" {
-			t.Errorf("XFromCache header isn't blank")
+		if got := resp.Header.Get(XFromCache); got != "" {
+			t.Errorf("XFromCache header isn't blank: %q", got)
 		}
 	}
 }
@@ -305,8 +314,8 @@ func TestDontStorePartialRangeInCache(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("response status code isn't 200 OK: %v", resp.StatusCode)
 		}
-		if resp.Header.Get(XFromCache) != "" {
-			t.Error("XFromCache header isn't blank")
+		if got := resp.Header.Get(XFromCache); got != "" {
+			t.Errorf("XFromCache header isn't blank: %q", got)
 		}
 	}
 	{
@@ -469,8 +478,8 @@ func TestGetOnlyIfCachedMiss(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.Header.Get(XFromCache) != "" {
-		t.Fatal("XFromCache header isn't blank")
+	if got := resp.Header.Get(XFromCache); got != "" {
+		t.Errorf("XFromCache header isn't blank: %q", got)
 	}
 	if resp.StatusCode != http.StatusGatewayTimeout {
 		t.Fatalf("response status code isn't 504 GatewayTimeout: %v", resp.StatusCode)
@@ -490,8 +499,8 @@ func TestGetNoStoreRequest(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		if resp.Header.Get(XFromCache) != "" {
-			t.Fatal("XFromCache header isn't blank")
+		if got := resp.Header.Get(XFromCache); got != "" {
+			t.Errorf("XFromCache header isn't blank: %q", got)
 		}
 	}
 	{
