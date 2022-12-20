@@ -101,6 +101,10 @@ type Transport struct {
 	// If nil, http.DefaultTransport is used
 	Transport http.RoundTripper
 	Cache     Cache
+	// ShouldCache allows configuring non-standard caching behaviour on the basis of the
+	// response, allowing callers to cache things like 404 responses when that would be
+	// desired.
+	ShouldCache func(resp *http.Response) bool
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
 }
@@ -198,6 +202,12 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			// In case of transport failure and stale-if-error activated, returns cached content
 			// when available
 			return cachedResp, nil
+		} else if t.ShouldCache != nil && t.ShouldCache(resp) {
+			// Should cache allows bypassing the behaviour on error, if we think the response
+			// should be cached.
+			//
+			// We leave this branch empty as we want to proceed onto the rest of the caching
+			// controlflow.
 		} else {
 			if err != nil || resp.StatusCode != http.StatusOK {
 				t.Cache.Delete(cacheKey)
