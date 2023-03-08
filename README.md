@@ -1,7 +1,7 @@
 httpcache
 =========
 
-[![Build Status](https://travis-ci.org/gregjones/httpcache.svg?branch=master)](https://travis-ci.org/gregjones/httpcache) [![GoDoc](https://godoc.org/github.com/secure-cloud-stack/httpcache?status.svg)](https://godoc.org/github.com/secure-cloud-stack/httpcache)
+[![GoDoc](https://godoc.org/github.com/secure-cloud-stack/httpcache?status.svg)](https://godoc.org/github.com/secure-cloud-stack/httpcache)
 
 Package httpcache provides a http.RoundTripper implementation that works as a mostly [RFC 7234](https://tools.ietf.org/html/rfc7234) compliant cache for http responses.
 
