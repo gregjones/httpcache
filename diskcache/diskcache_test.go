@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/gregjones/httpcache/test"
+	"github.com/secure-cloud-stack/httpcache/test"
 )
 
 func TestDiskCache(t *testing.T) {

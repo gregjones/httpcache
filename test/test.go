@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/gregjones/httpcache"
+	"github.com/secure-cloud-stack/httpcache"
 )
 
 // Cache excercises a httpcache.Cache implementation.

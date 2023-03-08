@@ -720,7 +720,7 @@ func TestGetWithDoubleVary(t *testing.T) {
 func TestGetWith2VaryHeaders(t *testing.T) {
 	resetTest()
 	// Tests that multiple Vary headers' comma-separated lists are
-	// merged. See https://github.com/gregjones/httpcache/issues/27.
+	// merged. See https://github.com/secure-cloud-stack/httpcache/issues/27.
 	const (
 		accept         = "text/plain"
 		acceptLanguage = "da, en-gb;q=0.8, en;q=0.7"
