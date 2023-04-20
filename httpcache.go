@@ -9,6 +9,7 @@ package httpcache
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -108,6 +109,8 @@ type Transport struct {
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
+	// Context timeout for async requests triggered by stale-while-revalidate
+	AsyncRevalidateTimeout time.Duration
 }
 
 // NewTransport returns a new Transport with the
@@ -172,11 +175,16 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 			if freshness == fresh {
 				return cachedResp, nil
 			} else if freshness == staleWhileRevalidate {
-				noCacheRequest := *req
-				noCacheRequest.Header = noCacheRequest.Header.Clone()
+				bgContext := context.Background()
+				cancelContext := func() {}
+				if t.AsyncRevalidateTimeout > 0 {
+					bgContext, cancelContext = context.WithTimeout(bgContext, t.AsyncRevalidateTimeout)
+				}
+				noCacheRequest := req.Clone(bgContext)
 				noCacheRequest.Header.Set("cache-control", "no-cache")
 				go func() {
-					resp, err := t.RoundTrip(&noCacheRequest)
+					defer cancelContext()
+					resp, err := t.RoundTrip(noCacheRequest)
 					if err == nil {
 						defer resp.Body.Close()
 						buffer := make([]byte, 4096)
