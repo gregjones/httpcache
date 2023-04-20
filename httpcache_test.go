@@ -71,6 +71,13 @@ func setup() {
 		w.Write([]byte("Some text content"))
 	}))
 
+	staleWhileRevalidateCounter := 0
+	mux.HandleFunc("/stale-while-revalidate", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		staleWhileRevalidateCounter++
+		w.Header().Set("X-Counter", strconv.Itoa(staleWhileRevalidateCounter))
+		w.Header().Set("Cache-Control", "max-age=100, stale-while-revalidate=100")
+	}))
+
 	mux.HandleFunc("/nostore", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 	}))
@@ -1034,6 +1041,31 @@ func TestMaxAge(t *testing.T) {
 	}
 }
 
+func TestFreshnessStaleWhileRevalidate(t *testing.T) {
+	resetTest()
+	now := time.Now()
+	respHeaders := http.Header{}
+	respHeaders.Set("date", now.Format(time.RFC1123))
+	respHeaders.Set("Cache-Control", "max-age=100, stale-while-revalidate=100")
+
+	reqHeaders := http.Header{}
+
+	clock = &fakeClock{elapsed: 50 * time.Second}
+	if getFreshness(respHeaders, reqHeaders) != fresh {
+		t.Fatal("freshness isn't fresh")
+	}
+
+	clock = &fakeClock{elapsed: 150 * time.Second}
+	if getFreshness(respHeaders, reqHeaders) != staleWhileRevalidate {
+		t.Fatal("freshness isn't staleWhileRevalidate")
+	}
+
+	clock = &fakeClock{elapsed: 250 * time.Second}
+	if getFreshness(respHeaders, reqHeaders) != stale {
+		t.Fatal("freshness isn't stale")
+	}
+}
+
 func TestMaxAgeZero(t *testing.T) {
 	resetTest()
 	now := time.Now()
@@ -1471,5 +1503,117 @@ func TestClientTimeout(t *testing.T) {
 	}
 	if taken >= 2*time.Second {
 		t.Error("client.Do took 2+ seconds, want < 2 seconds")
+	}
+}
+
+func TestStaleWhileRevalidate(t *testing.T) {
+	resetTest()
+	req, err := http.NewRequest("GET", s.server.URL+"/stale-while-revalidate", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var counter1 string
+	{
+		// 1st request: Not cached
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.Header.Get(XFromCache) != "" {
+			t.Fatalf(`XFromCache header isn't absent: %v`, resp.Header.Get(XFromCache))
+		}
+		if resp.Header.Get(XFreshness) != "" {
+			t.Fatalf(`X-Cache-Freshness header isn't absent: %v`, resp.Header.Get(XFreshness))
+		}
+
+		counter1 = resp.Header.Get("x-counter")
+
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	{
+		// 2nd request: Fresh
+		clock = &fakeClock{elapsed: 50 * time.Second}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+		if resp.Header.Get(XFreshness) != string(fresh) {
+			t.Fatalf(`X-Cache-Freshness header isn't "%v": %v`, fresh, resp.Header.Get(XFreshness))
+		}
+
+		counter := resp.Header.Get("x-counter")
+		if counter1 != counter {
+			t.Fatalf(`"x-counter" values are different: %v %v`, counter1, counter)
+		}
+
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	{
+		// 3rd request: Stale-While-Revalidate
+		clock = &fakeClock{elapsed: 150 * time.Second}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+		if resp.Header.Get(XFreshness) != string(staleWhileRevalidate) {
+			t.Fatalf(`X-Cache-Freshness header isn't "%v": %v`, staleWhileRevalidate, resp.Header.Get(XFreshness))
+		}
+
+		counter := resp.Header.Get("x-counter")
+		if counter1 != counter {
+			t.Fatalf(`"x-counter" values are different: %v %v`, counter1, counter)
+		}
+
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Revalidate is asynchronous, make sure it completes executing
+		time.Sleep(1 * time.Second)
+	}
+	{
+		// 4th request: Return the response cached just now
+		clock = &fakeClock{elapsed: 50 * time.Second}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.Header.Get(XFromCache) != "1" {
+			t.Fatalf(`XFromCache header isn't "1": %v`, resp.Header.Get(XFromCache))
+		}
+		if resp.Header.Get(XFreshness) != string(fresh) {
+			t.Fatalf(`X-Cache-Freshness header isn't "%v": %v`, fresh, resp.Header.Get(XFreshness))
+		}
+
+		counter := resp.Header.Get("x-counter")
+		if counter1 == counter {
+			t.Fatalf(`"x-counter" values are equal: %v %v`, counter1, counter)
+		}
+
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }

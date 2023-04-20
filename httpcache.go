@@ -9,6 +9,7 @@ package httpcache
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -19,12 +20,17 @@ import (
 	"time"
 )
 
+type Freshness string
+
 const (
-	stale = iota
-	fresh
-	transparent
+	stale                Freshness = "stale"
+	staleWhileRevalidate Freshness = "stale-while-revalidate"
+	fresh                Freshness = "fresh"
+	transparent          Freshness = "transparent"
+
 	// XFromCache is the header added to responses that are returned from the cache
 	XFromCache = "X-From-Cache"
+	XFreshness = "X-Cache-Freshness"
 )
 
 // A Cache interface is used by the Transport to store and retrieve responses.
@@ -103,6 +109,8 @@ type Transport struct {
 	Cache     Cache
 	// If true, responses returned from the cache will be given an extra header, X-From-Cache
 	MarkCachedResponses bool
+	// Context timeout for async requests triggered by stale-while-revalidate
+	AsyncRevalidateTimeout time.Duration
 }
 
 // NewTransport returns a new Transport with the
@@ -160,7 +168,33 @@ func (t *Transport) RoundTrip(req *http.Request) (resp *http.Response, err error
 		if varyMatches(cachedResp, req) {
 			// Can only use cached value if the new request doesn't Vary significantly
 			freshness := getFreshness(cachedResp.Header, req.Header)
+			if t.MarkCachedResponses {
+				cachedResp.Header.Set(XFreshness, string(freshness))
+			}
+
 			if freshness == fresh {
+				return cachedResp, nil
+			} else if freshness == staleWhileRevalidate {
+				bgContext := context.Background()
+				cancelContext := func() {}
+				if t.AsyncRevalidateTimeout > 0 {
+					bgContext, cancelContext = context.WithTimeout(bgContext, t.AsyncRevalidateTimeout)
+				}
+				noCacheRequest := req.Clone(bgContext)
+				noCacheRequest.Header.Set("cache-control", "no-cache")
+				go func() {
+					defer cancelContext()
+					resp, err := t.RoundTrip(noCacheRequest)
+					if err == nil {
+						defer resp.Body.Close()
+						buffer := make([]byte, 4096)
+						for {
+							if _, err = resp.Body.Read(buffer); err == io.EOF {
+								break
+							}
+						}
+					}
+				}()
 				return cachedResp, nil
 			}
 
@@ -288,7 +322,7 @@ var clock timer = &realClock{}
 //
 // Because this is only a private cache, 'public' and 'private' in cache-control aren't
 // signficant. Similarly, smax-age isn't used.
-func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
+func getFreshness(respHeaders, reqHeaders http.Header) Freshness {
 	respCacheControl := parseCacheControl(respHeaders)
 	reqCacheControl := parseCacheControl(reqHeaders)
 	if _, ok := reqCacheControl["no-cache"]; ok {
@@ -364,6 +398,16 @@ func getFreshness(respHeaders, reqHeaders http.Header) (freshness int) {
 
 	if lifetime > currentAge {
 		return fresh
+	}
+
+	if stalewhilerevalidate, ok := respCacheControl["stale-while-revalidate"]; ok {
+		// If the cached response isn't too stale, we can return it and refresh asynchronously
+		stalewhilerevalidateDuration, err := time.ParseDuration(stalewhilerevalidate + "s")
+		if err == nil {
+			if lifetime+stalewhilerevalidateDuration > currentAge {
+				return staleWhileRevalidate
+			}
+		}
 	}
 
 	return stale
